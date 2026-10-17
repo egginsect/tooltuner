@@ -115,3 +115,30 @@ Every record carries `schema_version:1`, `owner_id`, `created_at`, `provenance` 
 | evidence blob | 16 KiB | Fixture payloads are small. Larger payloads are truncated with `truncated:true`. |
 | dispatch timeout | 30 s | Longer than a normal tool call. A timeout records `unknown`. |
 | experiment versions | 4 | Baseline plus a few previews. |
+
+## Graph model (FalkorDB, graph `flywheel`)
+
+Each record is one node.
+- The label is the record name: `Application`, `Version`, `Call`, `CallEvent`, `Evidence`, `Feedback`, `Packet`, `Job`, `Evaluation`, `Recommendation`, `HumanDecision`, `Grant`.
+- The key property is the record id (`application` for `Application`).
+- `doc` holds the full record as canonical JSON. Read it back and parse it with the contract schema.
+- Scalar properties used for filtering are copied next to `doc`: `owner_id`, `application`, `created_at`, `state`, `outcome`.
+
+Edges:
+
+| Edge | Meaning |
+|---|---|
+| `(Application)-[:HAS_VERSION]->(Version)` | Registry. |
+| `(Application)-[:STABLE]->(Version)` | Stable pointer. Exactly one per app. Only the owner CLI changes it. |
+| `(Version)-[:DERIVED_FROM]->(Version)` | Parent version. |
+| `(Call)-[:RESOLVED]->(Version)` | Version pinned at admission. |
+| `(Call)-[:HAS_EVENT]->(CallEvent)` | Admission and completion events. |
+| `(Call)-[:INPUT\|OUTPUT]->(Evidence)` | Sanitized call payloads. |
+| `(Call)-[:CAUSED_BY]->(Call)` | `causal_refs`. |
+| `(Feedback)-[:ABOUT]->(Call)`, `(Feedback)-[:TEXT]->(Evidence)` | Feedback target and text. |
+| `(Packet)-[:INCLUDES]->(Call\|Feedback\|Evidence)` | Packet contents. |
+| `(Packet)-[:BASED_ON]->(Version)`, `(Packet)-[:SUCCESSOR_OF]->(Packet)` | Packet lineage. |
+| `(Job)-[:FOR_PACKET]->(Packet)`, `(Job)-[:PRODUCED]->(Version)` | Job input and the preview it produced. |
+| `(Evaluation)-[:COMPARES]->(Version)`, `(Evaluation)-[:RAN]->(Call)` | Experiments. |
+| `(Recommendation)-[:FROM]->(Evaluation)`, `(Recommendation)-[:RECOMMENDS]->(Version)` | Recommendations. |
+| `(HumanDecision)-[:SELECTED\|EXPECTED_CURRENT]->(Version)` | Owner decisions. |

@@ -343,6 +343,8 @@ export const Version = z.object({
   label: VersionLabel,
   parent_version_id: VersionId.nullable(),
   source: z.object({ repo_id: z.string(), commit_sha: Sha }),
+  /** Inner tool catalog snapshot read from the artifact at registration; schema_digest = canonicalDigest({tools}). */
+  tools: z.array(InnerTool),
   schema_digest: Digest,
   runtime_target: RuntimeTarget,
   /** Name of a server-side credential reference; never the secret itself. */
