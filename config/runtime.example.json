@@ -1,0 +1,31 @@
+{
+  "status": "not-configured",
+  "repositories": [],
+  "runnerConfigs": [],
+  "previewProjects": [],
+  "experimentConfigs": [],
+  "integration": {
+    "jobs": "createJobService({db,repositories,runnerConfigs,runner,getPacket,issueDevelopmentToken,manager,registerPreview})",
+    "experiments": "createExperimentService({db,configs,getPacket,getCall,getEvidence,getVersion,replay})",
+    "schema": "Add JOB_INDEX_SPECS and EXPERIMENT_INDEX_SPECS to the composition root bootstrap specs.",
+    "developmentToken": "After insertGrant, issue a short-lived access token for that exact persisted grant using db/auth issueTokenPair. Never give the runner a refresh, manager or owner token.",
+    "registerPreview": "Use the trusted registry adapter with ctx, completed job, frozen packet and VerifiedPreview. Deduplicate by job_id; never change stable.",
+    "runtimeVerification": "Runtime composes createProtectedPreviewVerifier({credentials,projects}) with createVercelManager. Configure credentialStore, vercelExecutable and previewProjects with authConfigRef, issuer, scopes and mcpPath. Real SDK initialize/catalog plus anonymous/invalid/wrong-resource rejection and introspection must pass. No inbound bearer forwarding, redirects or production credential reuse.",
+    "replay": "Use createTrustedExperimentReplay({db,recorder,getVersion,invokePinned}) with the SDK callUpstream transport. MANAGEMENT app/tool/repo scope authorizes only safe exact pinned trials against the persisted frozen evaluation; direct USER dispatch and raw evidence remain denied. No grant-group union.",
+    "runConfig": "Use immutable config refs, fixtureStateRef, expectedOutput and maxVersions (2-4). criterion:expected-output compares canonical persisted tool output. Only read-only non-destructive tools can replay. Cost and agent-visible context are unmeasured."
+  },
+  "liveGates": [
+    "Complete the hosted-client OAuth gate on the owner's fixed HTTPS origin before live coding/deployment acceptance.",
+    "Configure an allowlisted owner/application/repo/localPath/full base SHA and runner config ID. No caller prompts or paths authorize work.",
+    "Permit bubblewrap user/PID/mount namespaces for the runner service. No unsandboxed fallback exists.",
+    "Configure a dedicated coding CLI login under /opt, independently of owner/manager HOME. Do not copy existing auth files. Explicitly mount only that runner directory read-only and set CODEX_HOME or CLAUDE_CONFIG_DIR through the runner allowlist. Provider auth variables may instead be explicitly provided from a runner-only secret source.",
+    "Runner executable must exist inside /usr or an explicit /opt read-only mount. writablePaths must be existing explicit relative files/directories, never repository root. Configure actual checks and a timeout up to one hour. Keep caches and temporary build output in /tmp; ignored files are rejected so deployed bytes belong to the committed artifact.",
+    "Network is disabled by default. Approved coding-provider connectivity requires network:true and explicit public certificate/DNS mounts. The HOME is isolated, host manager/owner state is never mounted.",
+    "Supply an existing Vercel team/project/repository mapping and manager-only token; no automatic project creation. Verify the existing production baseline before deployment to avoid the first-deployment production exception.",
+    "CLI uses explicit preview target, then provider API verifies real target, ready state, team/project, unique deployment URL and manager-uploaded artifact provenance. Production/custom targets fail closed.",
+    "Configure the manager-only credentialStore (environment or writable helper), vercelExecutable and existing previewProjects with providerRepoId, authConfigRef, issuer, scopes and mcpPath. Resource-bound OAuth refresh plus authoritative token introspection must be supported. Runtime composes protected SDK verification and registry recording; missing configuration remains unavailable.",
+    "Call get_job on later turns to collect the real process exit/artifact and coordinate deployment/registration. There is no scheduler or chat wakeup promise.",
+    "An interrupted run/deploy/comparison is uncertain and never automatically resubmitted. Reconcile provider job/run/deployment IDs manually before authorizing any new logical request.",
+    "Record two independent real client sessions, baseline defect and actual preview comparison plus grant allow/deny matrix before marking TOO-78/70 complete. Human merge/activation remain separate owner actions."
+  ]
+}
