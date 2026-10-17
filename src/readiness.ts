@@ -19,8 +19,8 @@ export interface ReadinessItem {
 }
 
 /**
- * Items derived from configuration alone. Features whose code is still a stub are reported
- * `unverified` when configured, never `ready`.
+ * Items derived from configuration alone. Runtime composition replaces these after loading
+ * actual adapters/configuration; configured values alone never establish readiness.
  */
 export function configReadiness(config: Config): ReadinessItem[] {
   const items: ReadinessItem[] = [];
@@ -32,34 +32,33 @@ export function configReadiness(config: Config): ReadinessItem[] {
   );
 
   const oauthMissing = [
-    config.oauth.issuer === undefined ? "OAUTH_ISSUER" : undefined,
+    config.publicOrigin === undefined ? "FLYWHEEL_PUBLIC_ORIGIN" : undefined,
     config.oauth.resource === undefined ? "OAUTH_RESOURCE (or FLYWHEEL_PUBLIC_ORIGIN)" : undefined,
-    config.oauth.allowedRedirectUris.length === 0 ? "OAUTH_ALLOWED_REDIRECT_URIS" : undefined,
-    config.oauth.signingKeyRef === undefined ? "OAUTH_SIGNING_KEY_REF" : undefined,
+    config.owner.secret === undefined ? "FLYWHEEL_OWNER_SECRET" : undefined,
   ].filter((entry): entry is string => entry !== undefined);
   items.push(
     oauthMissing.length > 0
-      ? { name: "flywheel_oauth", status: "not_configured", critical: true, detail: `Missing: ${oauthMissing.join(", ")}`, action: "Protected dispatch stays disabled until OAuth is configured (TOO-77)" }
-      : { name: "flywheel_oauth", status: "unverified", critical: true, detail: "OAuth configuration present; the OAuth server is not implemented in the foundation" },
+      ? { name: "flywheel_oauth", status: "not_configured", critical: true, detail: `Missing: ${oauthMissing.join(", ")}`, action: "Set the public origin and owner consent secret; create an owner grant with npm run owner -- grant create" }
+      : { name: "flywheel_oauth", status: "unverified", critical: true, detail: "Built-in OAuth configuration present (DCR, PKCE, opaque tokens); route mounting, active grants and public reachability require runtime verification" },
   );
 
   items.push({
     name: "upstream_linking",
     status: "not_configured",
     critical: false,
-    detail: "Owner upstream account linking is not implemented yet",
-    action: "Implemented by the gateway worker (TOO-77)",
+    detail: "Upstream account linking is unavailable in the auth-only layer; local fixtures need no account",
+    action: "Use the later gateway/runtime layer for owner account linking and credential mediation",
   });
 
   items.push(
     config.registry.fixtureRegistryPath === undefined
-      ? { name: "fixtures", status: "not_configured", critical: false, detail: "FIXTURE_REGISTRY_PATH is unset; no applications are registered", action: "Register fixtures with TOO-64" }
-      : { name: "fixtures", status: "unverified", critical: false, detail: `Registry file ${config.registry.fixtureRegistryPath} is configured but not loaded by the foundation` },
+      ? { name: "fixtures", status: "not_configured", critical: false, detail: "No fixture bootstrap requested; existing graph registrations are retained", action: "Set FIXTURE_REGISTRY_PATH to the explicit loopback/source configuration in docs/demo.md" }
+      : { name: "fixtures", status: "unverified", critical: false, detail: `Fixture configuration ${config.registry.fixtureRegistryPath} needs live catalog verification` },
   );
 
   items.push(
     config.runner.configPath === undefined
-      ? { name: "runner", status: "not_configured", critical: false, detail: "RUNNER_CONFIG_PATH is unset; coding jobs cannot start", action: "Configure the runner with TOO-78" }
+      ? { name: "runner", status: "not_configured", critical: false, detail: "RUNNER_CONFIG_PATH is unset; coding jobs cannot start", action: "Configure repository/runner allowlists and the isolated coding CLI (docs/demo.md)" }
       : { name: "runner", status: "unverified", critical: false, detail: `Runner config ${config.runner.configPath} is referenced but not loaded` },
   );
 
