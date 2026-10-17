@@ -9,11 +9,18 @@
  *   npm run owner -- grant revoke grant_...
  */
 import { parseArgs } from "node:util";
+import { readFile } from "node:fs/promises";
+import { z } from "zod";
 import { Grant, GrantId, newId, SCHEMA_VERSION, ToolGroup, type Grant as GrantRecord } from "../contracts.js";
 import { loadConfig } from "../config.js";
 import { GraphClient } from "../db/client.js";
 import { bootstrapSchema, INDEX_SPECS } from "../db/schema.js";
 import { insertGrant, listGrants, revokeGrant } from "../db/auth.js";
+import { REGISTRY_INDEX_SPECS, UpstreamAccount, CredentialBinding } from "../db/registry.js";
+import { activateVersion, rollbackVersion, recordMerge } from "./versions.js";
+import { HumanDecision } from "../contracts.js";
+import { beginUpstreamAccountLink, linkUpstreamAccount } from "./link.js";
+import { CredentialStoreConfiguration, createConfiguredCredentialStore } from "../runtime.js";
 
 type Command = (db: GraphClient, ownerId: string, argv: string[]) => Promise<unknown>;
 
@@ -81,11 +88,53 @@ const grantRevoke: Command = async (db, ownerId, argv) => {
   return { grant_id: id, revoked: true, note: "All tokens issued under this grant are revoked." };
 };
 
-/** Owner grant commands; later layers add account and version decisions. */
+/** These record owner decisions only; merge does not execute a Git merge. */
+function ownerDecision(kind: "merge" | "activate" | "rollback"): Command {
+  return async (db, ownerId, argv) => {
+    const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" } } });
+    if (!values.input || !values.subject) throw new Error(`decision ${kind} needs --input <receipt.json> and --subject <owner identity>`);
+    const schema = HumanDecision.omit({ schema_version: true, owner_id: true, created_at: true, provenance: true,
+      completeness: true, decision_id: true, kind: true }).extend({ receipt: z.record(z.string(), z.unknown()) }).strict();
+    const input = schema.parse(JSON.parse(await readFile(values.input, "utf8")));
+    const owner = { owner_id: ownerId, subject: values.subject };
+    if (kind === "merge") {
+      if (!input.source) throw new Error("A merge decision needs the actual merged source and receipt");
+      return recordMerge(db, owner, { ...input, source: input.source });
+    }
+    if (!input.selected_version_id || input.source !== null) throw new Error("Activation/rollback need an exact selected version and source:null");
+    return (kind === "activate" ? activateVersion : rollbackVersion)(db, owner, { ...input, selected_version_id: input.selected_version_id });
+  };
+}
+
+const accountLink: Command = async (db, ownerId, argv) => {
+  const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" }, mode: { type: "string", default: "browser" } } });
+  if (!values.input || !values.subject || !["browser", "existing"].includes(values.mode!)) {
+    throw new Error("account link needs --input <nonsecret-link.json> --subject <owner identity> and --mode browser|existing");
+  }
+  const schema = z.object({
+    credentialStore: CredentialStoreConfiguration,
+    account: UpstreamAccount.omit({ schema_version: true, owner_id: true, created_at: true, client_id: true }).extend({ client_id: z.string().min(1).optional() }).strict(),
+    target: CredentialBinding.omit({ schema_version: true, owner_id: true, created_at: true, auth_config_ref: true,
+      application: true, repo_id: true, environment: true, issuer: true, scopes: true }).strict(),
+  }).strict();
+  const input = schema.parse(JSON.parse(await readFile(values.input, "utf8")));
+  const options = { db, owner: { owner_id: ownerId, subject: values.subject }, store: createConfiguredCredentialStore(input.credentialStore, process.env),
+    account: input.account, target: input.target };
+  const result = values.mode === "existing" ? await linkUpstreamAccount(options) : await beginUpstreamAccountLink({ ...options,
+    onAuthorizationUrl: (url) => { process.stderr.write(`Open this owner authorization URL in your local browser: ${url.href}\n`); },
+  });
+  return { linked: true, auth_config_ref: result.account.auth_config_ref, application: result.account.application,
+    repo_id: result.account.repo_id, environment: result.account.environment, resource: result.binding.resource, schema_digest: result.schema_digest };
+};
+
 export const COMMANDS: Record<string, Command> = {
   "grant create": grantCreate,
   "grant list": grantList,
   "grant revoke": grantRevoke,
+  "account link": accountLink,
+  "decision merge": ownerDecision("merge"),
+  "decision activate": ownerDecision("activate"),
+  "decision rollback": ownerDecision("rollback"),
 };
 
 async function main(): Promise<void> {
@@ -103,7 +152,7 @@ async function main(): Promise<void> {
     password: config.database.password,
   });
   try {
-    await bootstrapSchema(db, INDEX_SPECS);
+    await bootstrapSchema(db, [...INDEX_SPECS, ...REGISTRY_INDEX_SPECS]);
     const result = await command(db, config.owner.id, rest);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } finally {

@@ -13,7 +13,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
-    "owner": "tsx src/cli/owner.ts"
+    "owner": "tsx src/cli/owner.ts",
+    "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
