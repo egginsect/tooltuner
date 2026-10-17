@@ -11,7 +11,7 @@ import {
   type FlywheelOperation,
   type Grant,
   type ToolGroup,
-} from "../contracts.js";
+} from "./contracts.js";
 
 export function isFlywheelOperation(tool: string): tool is FlywheelOperation {
   return Object.hasOwn(FLYWHEEL_OPERATIONS, tool);

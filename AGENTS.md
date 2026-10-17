@@ -45,14 +45,14 @@ why in the PR.
 | `src/server.ts`, `src/app.ts`, `src/config.ts`, `src/readiness.ts`, `src/lifecycle.ts`, `src/log.ts`, `src/errors.ts`, `src/db/client.ts`, `src/db/schema.ts` | Scaffold (TOO-66) | Composition root, config, health, storage client, index bootstrap. Keep changes small. |
 | `src/contracts.ts`, `docs/contracts.md`, `docs/decisions.md` | Lead (TOO-63, TOO-65) | The only record/API/error schema source. Do not define a second payload shape elsewhere. |
 | `src/db/<record>.ts` repository files | The ticket that needs the record (TOO-64, 67, 68, 69, 70, 78) | Small explicit functions that take a `GraphClient` and domain records. Register their indexes in `INDEX_SPECS` (`src/db/schema.ts`). |
-| `src/gateway/oauth/**`, `src/gateway/policy.ts`, `src/gateway/mcp.ts` | Lead (TOO-77) | OAuth authorization server, bearer auth, grant enforcement, outer MCP tools. |
+| `src/gateway/oauth/**`, `src/policy.ts`, `src/gateway/mcp.ts` | Lead (TOO-77) | OAuth authorization server, bearer auth, grant enforcement, outer MCP tools. |
 | `src/gateway/registry.ts`, `src/gateway/dispatch.ts`, `src/gateway/upstream.ts`, `fixtures/**` | TOO-64 + TOO-69 | Applications, versions, stable pointer, resolve/pin, upstream calls, fixture apps. |
 | `src/flywheel/**` | One file group per ticket | Evidence store and lineage (TOO-67), feedback and packets (TOO-68), jobs and previews (TOO-78), experiments (TOO-70). |
 | `tests/unit/**`, `tests/integration/**` | Whoever changes the code under test | Unit: no DB. Integration: real FalkorDB. |
 
 ### The gateway/flywheel seam
 
-- `src/gateway/**` and `src/flywheel/**` never import each other. Both depend on
+- `src/gateway/**` and `src/flywheel/**` never import each other. Both depend on `src/policy.ts` (grant enforcement), on
   `src/contracts.ts` (types, schemas, and the `CallRecorder`, `FlywheelHandlers` and `OperationContext` seams) and on `src/db/**`.
 - The flywheel module implements `CallRecorder` and `FlywheelHandlers`; `src/server.ts` passes them
   to the gateway, which mounts operations per grant using `FLYWHEEL_OPERATIONS[op].group`. Authorization is enforced in server code at
