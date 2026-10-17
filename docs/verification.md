@@ -10,7 +10,7 @@ fabricated or inferred from unit tests. No full integrated adversarial/security 
 |---|---|
 | Node | Node 24.21.0 observed locally on 2026-10-17 |
 | Locked installation | Existing local dependencies available; Passed fresh isolated offline install (158 packages); fresh tsx transform also passed |
-| Typecheck | Lead independently passed final frozen source at 2026-10-17 22:14 UTC |
+| Typecheck | Lead full-source check passed at 22:14 UTC; every exact committed layer also passed typecheck |
 | Auth/config units | Included in the final 60 passing unit checks across six files |
 | OAuth integration | Included in the final 93 passing real integration checks across nine files; focused lead OAuth regressions also accepted |
 | Runtime composition smoke | Five production-runtime checks passed at 22:13 UTC, including real owner CLI linking and configured protected upstream mediation |
@@ -65,11 +65,11 @@ stricter actual public OAuth, hosted-client and preview receipts. Submission is 
 
 ## Local integration results (2026-10-17)
 
-The lead independently accepted the frozen current source at 22:14 UTC:
+The lead ran the whole suite from 22:14:00 to 22:14:24.52 UTC:
 
 - `npm run typecheck`: passed.
-- `npm test`: 60 checks passed across six files.
-- `npm run test:integration`: 93 checks passed across nine files (24.52 seconds).
+- `npm test`: 60 checks passed across six files on that source snapshot.
+- `npm run test:integration`: 93 checks passed across nine files (24.52 seconds) on that source snapshot.
 - `git diff --check`: passed.
 - The runtime file contains five passing integration checks: real two-step owner OAuth/SDK/FalkorDB; MANAGEMENT-only frozen trials with direct upstream/raw-read denials and unchanged persisted grant; a real owner CLI synthetic account link followed by a configured protected upstream call; a separate server process and SIGTERM; and coding credential/configuration boundaries.
 
@@ -89,7 +89,7 @@ The earlier 21:43 passing suite was superseded by regression corrections for con
 
 At 22:10:01 UTC, the existing FalkorDB 4.22.1 / Redis 8.10.2 container exited 139 after native SIGSEGV; it was not OOM-killed. The native stack showed indexer activity; root cause remains unestablished. The same container restarted at 22:11 on the unchanged named volume, with no reset. Subsequent runtime checks and the final 93-check integration run passed. The interrupted four-test run is recorded as failed and does not count as acceptance.
 
-Each delivery layer must pass typecheck on its exact dependency-correct staged source before its commit. External gates in the ledger remain pending; no local assertion substitutes for hosted-client, authenticated coding CLI or provider receipts.
+The gateway worker saved a final account-conflict/callback guard delta and three corresponding test assertions at 22:14:39 UTC, after that whole-suite run. The lead reviewed and accepted this delta, then independently passed all 11 `gateway-credentials` checks on the committed final linking code at 22:19:27 UTC (5.47 seconds). The 93-check whole-suite result does not claim to include the later edit. Every delivery layer passed typecheck on its exact dependency-correct staged source before its commit. External gates in the ledger remain pending; no local assertion substitutes for hosted-client, authenticated coding CLI or provider receipts.
 
 ## Dependency license inventory
 
