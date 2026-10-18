@@ -1,41 +1,48 @@
 # PostgreSQL custody verification
 
-Verified 2026-10-18 UTC using synthetic credentials and ephemeral random encryption keys only.
-The additive source started from remote runtime tip `bbaeedf7f5d29462d15e4e1d552b06c080b74629`
-plus the local enrollment layer. Local snapshot commits are test provenance, not remote ancestry.
-No real provider credentials, external OAuth grants, production databases, deployments or tunnels
-were configured or accessed.
+Verified 2026-10-18 UTC using synthetic credentials and ephemeral encryption keys only.
+No real provider credentials, external OAuth grants, hosted databases, deployments or tunnels
+were configured or accessed. Disposable PostgreSQL and FalkorDB services were stopped after
+verification.
 
 ## Results
 
 - Strict TypeScript typecheck: passed.
-- Existing unit tests: 60/60 passed in six files.
-- New focused custody tests: 6/6 passed in two files against actual PostgreSQL 17.6 and FalkorDB.
-- Existing full FalkorDB integration suite: 78/93 passed, with the same 15 failures as the unchanged
-  runtime baseline in this execution environment. No isolation constraints were weakened.
-- Independent source security review: no remaining blocking findings for this scoped MVP.
+- Unit tests: 243/243 passed in nine files.
+- Full synthetic credential suite: 11/11 passed in three files against isolated PostgreSQL
+  17.6 and FalkorDB, including browser linking, owner CLI and protected runtime dispatch.
+- Independent source security review: no blocking finding for the scoped refresh protocol.
 
-The six custody checks prove encrypted SQL row contents, exact binding enforcement for every
-identity field, tamper rejection, historical/missing/wrong-key behavior, write-time key-version
-rotation, independent-session and separate-process lock contention, stale compare-and-swap
-rejection, durable interrupted-refresh fencing, and safe failure after terminating the exact
-synthetic database session while refresh work is awaited.
+The nine custody cases verify ciphertext-only SQL rows, exact binding enforcement, tamper
+rejection, historical/missing/wrong-key behavior, write-time key rotation, competing processes,
+stale writers and claims, repeat-claim rejection, recoverable pre-claim interruption, durable
+fencing after uncertain remote outcomes, and lost claim/completion acknowledgements after
+real committed SQL statements.
 
-The combined runtime check performs real local SDK dynamic client registration, PKCE and fixture
-consent, encrypted browser-link persistence, account linking through a separate owner CLI process,
-resource-bound refresh of an expired fixture credential, and successful protected upstream runtime
-dispatch. It verifies that CLI output and graph evidence contain neither token values nor keys.
-It is a local fixture result, not an external provider or real client-session authorization claim.
+Eight simultaneous simulated remote refreshes exceed the adapter's five-connection limit,
+demonstrating that network work does not retain database connections. The protocol uses
+standalone atomic statements, no session state and no schema migration. A live
+transaction-pooler proxy was not exercised.
 
-## Existing environment blockers
+The combined runtime checks perform local SDK dynamic registration, PKCE, fixture consent,
+encrypted browser-link persistence, owner CLI account linking, expired-credential refresh and
+protected upstream dispatch. They verify that CLI output and graph evidence contain neither
+token values nor keys. These are local fixture results, not live-provider authorization claims.
 
-Eight credential-helper integration cases fail because the fixture helper uses `/usr/bin/env node`
-with the production helper's fixed `/usr/bin:/bin` PATH, while this host provides Node under `/opt`.
-Seven sandboxed-job integration cases cannot start because this environment disallows the required
-bubblewrap networking/namespace operations and has no `/usr/bin/node` wrapper runtime. These are
-unchanged baseline failures; successful behavior after removing those blockers remains unverified.
+## Unknown-outcome safety
 
-The database services ran in isolated local test clusters and were stopped after verification.
-Use the commands and operational caveats in [the custody guide](postgres-credentials.md) to
-reproduce. Production key operations, recovery/revocation procedures and independent deployment
-security validation remain outside this implementation.
+A claim whose acknowledgement is unknown must never send the token request. Once claimed,
+any interrupted token-request outcome remains fenced without lease expiry or automatic replay.
+A committed replacement whose acknowledgement is lost fails the current operation; subsequent
+reads may use the durably persisted replacement token. No outcome permits replaying the old
+refresh token.
+
+## Scope and environment limits
+
+The broader FalkorDB integration suite was not rerun for this update. Earlier full-suite runs
+encountered a missing `/usr/bin/node` executable in fixed-PATH credential-helper and sandboxed
+job execution. That environment limitation is not evidence that namespaces are unavailable.
+
+Live hosted connectivity, transaction-pooler integration, production key operations,
+recovery/revocation procedures and deployment security validation remain unverified.
+See [the custody guide](postgres-credentials.md) for commands and operational caveats.

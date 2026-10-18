@@ -51,9 +51,10 @@ describe("hosted configuration", () => {
       expect(() => loadConfig({ ...hostedEnv, [key]: "test-only-forbidden" })).toThrow(key);
     }
   });
-  it("requires explicit direct/session custody and bounded database timeouts", () => {
+  it("supports transaction pooling without a mandatory mode declaration and bounds timeouts", () => {
     const credentials = { FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION: "v1", FLYWHEEL_CREDENTIAL_POSTGRES_URL: "test", FLYWHEEL_CREDENTIAL_KEYS: "test" };
-    expect(() => loadConfig({ ...hostedEnv, ...credentials })).toThrow(/CONNECTION_MODE/);
+    expect(loadConfig({ ...hostedEnv, ...credentials }).credentials.connectionMode).toBeUndefined();
+    expect(loadConfig({ ...hostedEnv, ...credentials, FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: "transaction" }).credentials.connectionMode).toBe("transaction");
     expect(loadConfig({ ...hostedEnv, ...credentials, FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: "direct" }).credentials.connectionMode).toBe("direct");
     expect(() => loadConfig({ ...hostedEnv, FALKORDB_CONNECT_TIMEOUT_MS: "0" })).toThrow();
     expect(() => loadConfig({ ...hostedEnv, FALKORDB_QUERY_TIMEOUT_MS: "999999" })).toThrow();
