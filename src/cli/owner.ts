@@ -21,6 +21,7 @@ import { activateVersion, rollbackVersion, recordMerge } from "./versions.js";
 import { HumanDecision } from "../contracts.js";
 import { beginUpstreamAccountLink, linkUpstreamAccount } from "./link.js";
 import { CredentialStoreConfiguration, createConfiguredCredentialStore } from "../runtime.js";
+import { enrollLocalApplication } from "./enroll.js";
 
 type Command = (db: GraphClient, ownerId: string, argv: string[]) => Promise<unknown>;
 
@@ -128,6 +129,11 @@ const accountLink: Command = async (db, ownerId, argv) => {
 };
 
 export const COMMANDS: Record<string, Command> = {
+  "application enroll-local": async (db, ownerId, argv) => {
+    const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" } } });
+    if (!values.input || !values.subject) throw new Error("application enroll-local needs --input <nonsecret-local-app.json> --subject <owner identity>");
+    return enrollLocalApplication(db, { owner_id: ownerId, subject: values.subject }, JSON.parse(await readFile(values.input, "utf8")));
+  },
   "grant create": grantCreate,
   "grant list": grantList,
   "grant revoke": grantRevoke,
