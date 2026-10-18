@@ -118,9 +118,9 @@ describe("Supabase REST validation",()=>{
     await expect(auth.password("user@example.invalid","synthetic-password")).rejects.toThrow("Sign-in could not be verified");
   });
   it("restricts configuration to a publishable key and disables legacy fallback",()=>{
-    expect(()=>loadConfig({FLYWHEEL_AUTH_MODE:"supabase",FLYWHEEL_PUBLIC_ORIGIN:origin,SUPABASE_URL:config.url,SUPABASE_PUBLISHABLE_KEY:"sb_secret_forbidden"})).toThrow();
-    expect(()=>loadConfig({FLYWHEEL_AUTH_MODE:"supabase",FLYWHEEL_PUBLIC_ORIGIN:origin,SUPABASE_URL:config.url,SUPABASE_PUBLISHABLE_KEY:config.publishableKey,FLYWHEEL_OWNER_SECRET:"s".repeat(32)})).toThrow();
-    expect(loadConfig({FLYWHEEL_OWNER_ID:A}).owner.id).toBe(A);
+    expect(()=>loadConfig({TOOLTUNER_AUTH_MODE:"supabase",TOOLTUNER_PUBLIC_ORIGIN:origin,SUPABASE_URL:config.url,SUPABASE_PUBLISHABLE_KEY:"sb_secret_forbidden"})).toThrow();
+    expect(()=>loadConfig({TOOLTUNER_AUTH_MODE:"supabase",TOOLTUNER_PUBLIC_ORIGIN:origin,SUPABASE_URL:config.url,SUPABASE_PUBLISHABLE_KEY:config.publishableKey,TOOLTUNER_OWNER_SECRET:"s".repeat(32)})).toThrow();
+    expect(loadConfig({TOOLTUNER_OWNER_ID:A}).owner.id).toBe(A);
   });
 });
 // No listening socket: invoke actual route handlers using synthetic request/response objects.
@@ -143,8 +143,8 @@ describe("multiuser runtime composition", () => {
   it("requires the restricted RLS adapter and never enables the legacy owner-secret provider", async () => {
     vi.spyOn(schema,"bootstrapSchema").mockResolvedValue({graph:"synthetic",schemaVersion:1,indexesCreated:0,constraintsCreated:0,freshGraph:false});
     const storeFactory=vi.spyOn(postgres,"createPostgresCredentialStore").mockReturnValue({get:vi.fn(),initialize:vi.fn(),close:vi.fn()});
-    const environment={FLYWHEEL_AUTH_MODE:"supabase",FLYWHEEL_PUBLIC_ORIGIN:origin,SUPABASE_URL:"https://project.supabase.co",SUPABASE_PUBLISHABLE_KEY:"sb_publishable_synthetic",FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION:"v1",
-      FLYWHEEL_CREDENTIAL_POSTGRES_URL:"postgresql://synthetic@localhost/synthetic",FLYWHEEL_CREDENTIAL_KEYS:JSON.stringify({v1:Buffer.alloc(32).toString("base64")})};
+    const environment={TOOLTUNER_AUTH_MODE:"supabase",TOOLTUNER_PUBLIC_ORIGIN:origin,SUPABASE_URL:"https://project.supabase.co",SUPABASE_PUBLISHABLE_KEY:"sb_publishable_synthetic",TOOLTUNER_CREDENTIAL_ACTIVE_KEY_VERSION:"v1",
+      TOOLTUNER_CREDENTIAL_POSTGRES_URL:"postgresql://synthetic@localhost/synthetic",TOOLTUNER_CREDENTIAL_KEYS:JSON.stringify({v1:Buffer.alloc(32).toString("base64")})};
     const runtime=await createRuntime({config:loadConfig(environment),db,environment});
     expect(storeFactory.mock.calls[0]![0]).toMatchObject({requireRls:true});
     expect(runtime.provider?.multiuser).toBe(true);

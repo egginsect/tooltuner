@@ -18,7 +18,7 @@ async function verifyPublicOrigin(origin: string, instanceId: string): Promise<R
       status: "failed",
       critical: false,
       detail: `${origin}/healthz answered HTTP ${response.status} but did not identify this process`,
-      action: "Check that the tunnel forwards to this host and port and that FLYWHEEL_PUBLIC_ORIGIN matches the tunnel hostname",
+      action: "Check that the tunnel forwards to this host and port and that TOOLTUNER_PUBLIC_ORIGIN matches the tunnel hostname",
     };
   } catch (error) {
     return {
@@ -35,7 +35,7 @@ async function verifyPublicOrigin(origin: string, instanceId: string): Promise<R
 export async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const log = createLogger(config.logLevel);
-  log.info("mcp-flywheel-ts starting", { config: describeConfig(config) });
+  log.info("tooltuner starting", { config: describeConfig(config) });
   const runtime = await startRuntime(config, { log: (message, fields) => log.info(message, fields) });
   // Install signal handlers before a public-origin probe can delay startup.
   const shutdown = (signal: string) => {

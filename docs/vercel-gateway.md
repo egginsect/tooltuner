@@ -55,11 +55,11 @@ values, copy another checkout's `.env` or `.vercel` state, or print credentials 
 
 | Variable | Requirement |
 | --- | --- |
-| `FLYWHEEL_PUBLIC_ORIGIN` | One fixed public HTTPS origin, without a path or trailing slash. Never infer it from a request Host header or ephemeral preview URL. |
-| `FLYWHEEL_AUTH_MODE` | Set `supabase` for independent users. The legacy `owner-secret` default remains for compatibility, with no automatic fallback between modes. |
+| `TOOLTUNER_PUBLIC_ORIGIN` | Optional override: one fixed public HTTPS origin without path or trailing slash. Otherwise trusted Vercel production or preview metadata supplies it; see [origin selection](configuration.md). Never derived from request headers. |
+| `TOOLTUNER_AUTH_MODE` | Set `supabase` for independent users. The legacy `owner-secret` default remains for compatibility, with no automatic fallback between modes. |
 | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Required in Supabase mode: exact HTTPS project origin and publishable key. See [Auth setup](supabase-auth.md). |
-| `FLYWHEEL_OWNER_ID` | Legacy owner namespace or explicit administrative CLI target UUID. Never selects the hosted Supabase user. |
-| `FLYWHEEL_OWNER_SECRET` | Legacy mode only: at least 32 characters in hosted mode. Must be unset in Supabase mode. |
+| `TOOLTUNER_OWNER_ID` | Legacy owner namespace or explicit administrative CLI target UUID. Never selects the hosted Supabase user. |
+| `TOOLTUNER_OWNER_SECRET` | Legacy mode only: at least 32 characters in hosted mode. Must be unset in Supabase mode. |
 | `FALKORDB_URL` | An external TLS endpoint using `rediss://` or `falkors://`, with no embedded credentials. Loopback and plaintext endpoints are rejected. |
 | `FALKORDB_GRAPH` | A dedicated graph for this gateway/environment. |
 | `FALKORDB_USERNAME` | The service's ACL username if required. |
@@ -67,8 +67,8 @@ values, copy another checkout's `.env` or `.vercel` state, or print credentials 
 | `FALKORDB_CONNECT_TIMEOUT_MS` | Initial TCP connection timeout, default 3000 ms, allowed 100–15000. |
 | `FALKORDB_QUERY_TIMEOUT_MS` | Per-query timeout, default 5000 ms, allowed 100–30000. Timed-out writes remain outcome-unknown. |
 
-The entry point forces `FLYWHEEL_RUNTIME_MODE=hosted`, even if the deployment accidentally
-sets `local`. `OAUTH_RESOURCE`, when supplied, must equal the fixed origin plus `/mcp`;
+The entry point forces `TOOLTUNER_RUNTIME_MODE=hosted`, even if the deployment accidentally
+sets `local`; conflicting old/new runtime aliases still fail closed. `OAUTH_RESOURCE`, when supplied, must equal the fixed origin plus `/mcp`;
 `OAUTH_ISSUER` must equal the fixed origin. Do not set `RUNNER_CONFIG_PATH`,
 `FIXTURE_REGISTRY_PATH` or `VERCEL_TOKEN` in the hosted environment; startup rejects them.
 
@@ -82,12 +82,12 @@ TLS trust and deployment protection still need provider-environment verification
 
 To resolve enrolled protected upstreams without loading a local runner file, also supply:
 
-- `FLYWHEEL_CREDENTIAL_POSTGRES_URL`: the dedicated PostgreSQL connection string, without
+- `TOOLTUNER_CREDENTIAL_POSTGRES_URL`: the dedicated PostgreSQL connection string, without
   URL query parameters. TLS certificate verification stays enabled.
-- `FLYWHEEL_CREDENTIAL_KEYS`: the external versioned JSON keyring described in
+- `TOOLTUNER_CREDENTIAL_KEYS`: the external versioned JSON keyring described in
   [credential custody](postgres-credentials.md).
-- `FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION`: the matching active encryption key version.
-- `FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE`: optional informational declaration:
+- `TOOLTUNER_CREDENTIAL_ACTIVE_KEY_VERSION`: the matching active encryption key version.
+- `TOOLTUNER_CREDENTIAL_POSTGRES_CONNECTION_MODE`: optional informational declaration:
   `direct`, `session` or `transaction`. It is not required for credential custody.
 
 Transaction-pooling endpoints are supported. Refresh ownership uses committed atomic

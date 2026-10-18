@@ -135,7 +135,7 @@ export async function createRuntime(options: RuntimeOptions) {
     repositories = integrations.repositories ?? file.repositories;
     runnerConfigs = integrations.runnerConfigs ?? file.runnerConfigs.map(({ environmentRefs, ...entry }) => ({ ...entry,
       environment: Object.fromEntries(Object.entries(environmentRefs).map(([name, reference]) => {
-        if (/(?:OWNER|MANAGER|MANAGEMENT|VERCEL|FLYWHEEL|FALKORDB|PRODUCTION|DEPLOY|BYPASS|PROJECT|ORG_ID|AWS|GITHUB|GH_TOKEN|UPSTREAM|OAUTH|CREDENTIAL)/i.test(reference)) {
+        if (/(?:OWNER|MANAGER|MANAGEMENT|VERCEL|FLYWHEEL|TOOLTUNER|FALKORDB|PRODUCTION|DEPLOY|BYPASS|PROJECT|ORG_ID|AWS|GITHUB|GH_TOKEN|UPSTREAM|OAUTH|CREDENTIAL)/i.test(reference)) {
           throw new Error("Runner environment references may name only independently provisioned runner credentials");
         }
         const value = environment[reference];
@@ -164,7 +164,7 @@ export async function createRuntime(options: RuntimeOptions) {
       }
     }
   }
-  const privilegedValues = new Set([config.owner.secret, config.database.password, environment.VERCEL_TOKEN, environment.FLYWHEEL_CREDENTIAL_POSTGRES_URL, environment.FLYWHEEL_CREDENTIAL_KEYS].filter((value): value is string => Boolean(value)));
+  const privilegedValues = new Set([config.owner.secret, config.database.password, environment.VERCEL_TOKEN, environment.TOOLTUNER_CREDENTIAL_POSTGRES_URL, environment.TOOLTUNER_CREDENTIAL_KEYS, environment.FLYWHEEL_CREDENTIAL_POSTGRES_URL, environment.FLYWHEEL_CREDENTIAL_KEYS].filter((value): value is string => Boolean(value)));
   for (const value of Object.values(environment)) {
     if (!value?.startsWith("{")) continue;
     try {

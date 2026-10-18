@@ -12,9 +12,9 @@ node-postgres driver; encryption uses Node's built-in AES-256-GCM implementation
 
 In the trusted process only, inject:
 
-- `FLYWHEEL_CREDENTIAL_POSTGRES_URL`: PostgreSQL connection URL. No query parameters. Use TLS
+- `TOOLTUNER_CREDENTIAL_POSTGRES_URL`: PostgreSQL connection URL. No query parameters. Use TLS
   with normal certificate verification. Never pass a URL/password on the command line.
-- `FLYWHEEL_CREDENTIAL_KEYS`: JSON object mapping key versions to base64-encoded 32-byte keys,
+- `TOOLTUNER_CREDENTIAL_KEYS`: JSON object mapping key versions to base64-encoded 32-byte keys,
   sourced from an external secret manager or an equivalent protected environment. Do not commit
   keys, store them in PostgreSQL, forward them to a coding subprocess, or put them in log output.
 

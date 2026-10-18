@@ -40,7 +40,7 @@ test("encrypted browser link, owner CLI, rotating refresh and runtime dispatch p
       onAuthorizationUrl: (url) => fixture.approve(url) });
     const before = OAuthCredential.parse(await store.get(account.credential_ref, linked.binding));
     const environment = { PATH: process.env.PATH, FALKORDB_URL: graphUrl, FALKORDB_GRAPH: graph,
-      FLYWHEEL_CREDENTIAL_POSTGRES_URL: connectionString, FLYWHEEL_CREDENTIAL_KEYS: JSON.stringify({ test: key.toString("base64") }) };
+      TOOLTUNER_CREDENTIAL_POSTGRES_URL: connectionString, TOOLTUNER_CREDENTIAL_KEYS: JSON.stringify({ test: key.toString("base64") }) };
     const linkFile = path.join(directory, "link.json"); const runtimeFile = path.join(directory, "runtime.json");
     await writeFile(linkFile, JSON.stringify({ credentialStore: configuration, account, target }));
     const cli = await promisify(execFile)(process.execPath, ["--import", "tsx", "src/cli/owner.ts", "account", "link", "--input", linkFile,

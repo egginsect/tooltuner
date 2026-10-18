@@ -42,14 +42,14 @@ export async function runLocalDemo() {
     assert(address && typeof address !== "string");
     const origin = `http://127.0.0.1:${address.port}`;
     const ownerSecret = randomBytes(32).toString("base64url");
-    const config = loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: origin, FLYWHEEL_OWNER_SECRET: ownerSecret, FALKORDB_GRAPH: graph });
+    const config = loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: origin, TOOLTUNER_OWNER_SECRET: ownerSecret, FALKORDB_GRAPH: graph });
     const integrations = { experimentConfigs: [{ ref: "config:local-demo-readonly-v1",
       fixtureStateRef: "fixture:pure-word-count-v1", maxVersions: 2,
       expectedOutput: { content: [{ type: "text", text: JSON.stringify(REPRODUCTION.expected) }], structuredContent: REPRODUCTION.expected } }] };
     let runtime = await createRuntime({ config, db, integrations });
     server.on("request", runtime.app);
     const owner = { owner_id: "owner", subject: "local-demo-operator" };
-    const source = { repo_id: "egginsect/mcp-flywheel-oss", commit_sha: sourceCommit };
+    const source = { repo_id: "egginsect/tooltuner", commit_sha: sourceCommit };
     const enroll = (application: string, description: string, label: string, parent: string | null = null) =>
       enrollLocalApplication(db!, owner, { application, description, label, source,
         url: `${fixture.baseUrl}/${application}/${label}/mcp`, deployment_id: `local:${application}:${label}`,
@@ -70,7 +70,7 @@ export async function runLocalDemo() {
 
     async function connect(groups: ToolGroup[], scope: Json = {}, owner = "owner") {
       const grant = Grant.parse({ schema_version: 1, grant_id: newId("grant"), owner_id: owner,
-        label: `local-sdk-${groups.join("-")}`, groups, allow: { apps: ["textkit", "catalog"], tools: {}, repos: ["egginsect/mcp-flywheel-oss"] },
+        label: `local-sdk-${groups.join("-")}`, groups, allow: { apps: ["textkit", "catalog"], tools: {}, repos: ["egginsect/tooltuner"] },
         scope, created_at: new Date().toISOString(), revoked_at: null });
       await insertGrant(db!, grant);
       const registration = await fetch(`${origin}/register`, { method: "POST", headers: { "content-type": "application/json" },
@@ -272,7 +272,7 @@ export async function runLocalDemo() {
         call: baseline.call_ref, packet: packetResult.packet_id, digest: packetResult.digest, stable: stableVersion.version_id,
         evaluation: evaluationId, activation: activation.decision_id, rollback: rollback.decision_id })], {
       timeout: 35_000,
-      env: { PATH: process.env.PATH, FLYWHEEL_PUBLIC_ORIGIN: origin, FLYWHEEL_OWNER_SECRET: ownerSecret,
+      env: { PATH: process.env.PATH, TOOLTUNER_PUBLIC_ORIGIN: origin, TOOLTUNER_OWNER_SECRET: ownerSecret,
         DEMO_ACCESS_TOKEN: refreshedTokens.access_token, DEMO_DEVELOPMENT_TOKEN: development.tokens.access_token,
         FALKORDB_URL: process.env.FALKORDB_URL ?? "redis://127.0.0.1:6379",
         ...(process.env.FALKORDB_USERNAME ? { FALKORDB_USERNAME: process.env.FALKORDB_USERNAME } : {}),

@@ -13,7 +13,7 @@ describe("loadConfig", () => {
   });
 
   it("treats empty strings (as listed in .env.example) as unset", () => {
-    const config = loadConfig({ PORT: "", FLYWHEEL_PUBLIC_ORIGIN: "", VERCEL_TOKEN: "", FALKORDB_PASSWORD: "" });
+    const config = loadConfig({ PORT: "", TOOLTUNER_PUBLIC_ORIGIN: "", VERCEL_TOKEN: "", FALKORDB_PASSWORD: "" });
     expect(config.http.port).toBe(8787);
     expect(config.publicOrigin).toBeUndefined();
     expect(config.vercel.tokenPresent).toBe(false);
@@ -23,7 +23,7 @@ describe("loadConfig", () => {
     const config = loadConfig({
       PORT: "9100",
       FALKORDB_GRAPH: "demo_graph",
-      FLYWHEEL_PUBLIC_ORIGIN: "https://flywheel.example.dev",
+      TOOLTUNER_PUBLIC_ORIGIN: "https://flywheel.example.dev",
     });
     expect(config.http.port).toBe(9100);
     expect(config.database.graph).toBe("demo_graph");
@@ -32,7 +32,7 @@ describe("loadConfig", () => {
   });
 
   it("reports every invalid value in one descriptive error", () => {
-    const attempt = () => loadConfig({ PORT: "70000", FALKORDB_URL: "redis://user:pass@host:6379", FALKORDB_GRAPH: "bad graph", FLYWHEEL_PUBLIC_ORIGIN: "http://flywheel.example.dev/path" });
+    const attempt = () => loadConfig({ PORT: "70000", FALKORDB_URL: "redis://user:pass@host:6379", FALKORDB_GRAPH: "bad graph", TOOLTUNER_PUBLIC_ORIGIN: "http://flywheel.example.dev/path" });
     expect(attempt).toThrow(ConfigError);
     try {
       attempt();
@@ -41,32 +41,32 @@ describe("loadConfig", () => {
       expect(issues).toContain("PORT");
       expect(issues).toContain("FALKORDB_URL");
       expect(issues).toContain("FALKORDB_GRAPH");
-      expect(issues).toContain("FLYWHEEL_PUBLIC_ORIGIN");
+      expect(issues).toContain("TOOLTUNER_PUBLIC_ORIGIN");
     }
   });
 
   it("rejects an OAuth resource on a different origin than the fixed public origin", () => {
-    expect(() => loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "https://flywheel.example.dev", OAUTH_RESOURCE: "https://other.example.dev/mcp" })).toThrow(/must equal FLYWHEEL_PUBLIC_ORIGIN/);
-    expect(() => loadConfig({ OAUTH_ISSUER: "https://flywheel.example.dev" })).toThrow(/FLYWHEEL_PUBLIC_ORIGIN/);
+    expect(() => loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "https://flywheel.example.dev", OAUTH_RESOURCE: "https://other.example.dev/mcp" })).toThrow(/must equal TOOLTUNER_PUBLIC_ORIGIN/);
+    expect(() => loadConfig({ OAUTH_ISSUER: "https://flywheel.example.dev" })).toThrow(/TOOLTUNER_PUBLIC_ORIGIN/);
   });
 
   it("rejects unsupported OAuth endpoint overrides on the same origin", () => {
     for (const resource of ["https://flywheel.example.dev/other", "https://flywheel.example.dev/mcp#fragment", "https://flywheel.example.dev/mcp?query=1"]) {
-      expect(() => loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "https://flywheel.example.dev", OAUTH_RESOURCE: resource })).toThrow(ConfigError);
+      expect(() => loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "https://flywheel.example.dev", OAUTH_RESOURCE: resource })).toThrow(ConfigError);
     }
-    expect(() => loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "https://flywheel.example.dev", OAUTH_ISSUER: "https://elsewhere.example" })).toThrow(ConfigError);
+    expect(() => loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "https://flywheel.example.dev", OAUTH_ISSUER: "https://elsewhere.example" })).toThrow(ConfigError);
     expect(() => loadConfig({ OAUTH_RESOURCE: "https://flywheel.example.dev/mcp" })).toThrow(ConfigError);
-    expect(() => loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "ftp://localhost" })).toThrow(ConfigError);
+    expect(() => loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "ftp://localhost" })).toThrow(ConfigError);
   });
 
   it("allows plain http only for localhost origins", () => {
-    expect(loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "http://localhost:8787" }).publicOrigin).toBe("http://localhost:8787");
-    expect(() => loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "http://flywheel.example.dev" })).toThrow(/https/);
+    expect(loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "http://localhost:8787" }).publicOrigin).toBe("http://localhost:8787");
+    expect(() => loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "http://flywheel.example.dev" })).toThrow(/https/);
   });
 });
 
 describe("secret handling", () => {
-  const env = { FALKORDB_PASSWORD: "super-secret-db-password", VERCEL_TOKEN: "super-secret-vercel-token", FLYWHEEL_OWNER_SECRET: "super-secret-owner-consent" };
+  const env = { FALKORDB_PASSWORD: "super-secret-db-password", VERCEL_TOKEN: "super-secret-vercel-token", TOOLTUNER_OWNER_SECRET: "super-secret-owner-consent" };
 
   it("never puts credential values into the log-safe description or the readiness report", () => {
     const config = loadConfig(env);
@@ -91,9 +91,9 @@ describe("configReadiness", () => {
   });
 
   it("requires the owner consent secret even when the public URL is configured", () => {
-    const item = configReadiness(loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: "https://flywheel.example.dev" })).find((i) => i.name === "flywheel_oauth");
+    const item = configReadiness(loadConfig({ TOOLTUNER_PUBLIC_ORIGIN: "https://flywheel.example.dev" })).find((i) => i.name === "flywheel_oauth");
     expect(item?.status).toBe("not_configured");
-    expect(item?.detail).toContain("FLYWHEEL_OWNER_SECRET");
+    expect(item?.detail).toContain("TOOLTUNER_OWNER_SECRET");
     expect(item?.detail).not.toContain("SIGNING");
     expect(item?.detail).not.toContain("REDIRECT");
   });
@@ -101,9 +101,9 @@ describe("configReadiness", () => {
   it("marks configured features unverified, not ready", () => {
     const items = configReadiness(
       loadConfig({
-        FLYWHEEL_PUBLIC_ORIGIN: "https://flywheel.example.dev",
+        TOOLTUNER_PUBLIC_ORIGIN: "https://flywheel.example.dev",
         OAUTH_ISSUER: "https://flywheel.example.dev",
-        FLYWHEEL_OWNER_SECRET: "test-owner-consent-secret",
+        TOOLTUNER_OWNER_SECRET: "test-owner-consent-secret",
       }),
     );
     const byName = Object.fromEntries(items.map((item) => [item.name, item.status]));

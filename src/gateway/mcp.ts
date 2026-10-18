@@ -32,6 +32,7 @@ import { FLYWHEEL_SCOPE, isSafeOAuthRedirect, type AuthExtra, type FlywheelOAuth
 import { renderConsentError } from "./oauth/consent.js";
 
 import { mountHumanAuth } from "./auth/routes.js";
+import { canonicalBrowserOrigin } from "./auth/canonical.js";
 import type { HumanAuth } from "./auth/supabase.js";
 import { clearFlow, flowCookie, readCookie, sessionCookie } from "./auth/browser.js";
 
@@ -61,7 +62,7 @@ export interface GatewayMountOptions {
 }
 
 const SERVER_INSTRUCTIONS = [
-  "MCP Flywheel gives one stable connection to several applications and their versions.",
+  "ToolTuner gives one stable connection to several applications and their versions.",
   "Call list_apps, then describe an application to see the inner tools your grant allows, then dispatch one of them.",
   "Omit `version` to use the stable version; pass a label like `v2` or a version id to pin a preview.",
   "To report a problem with a prior call, dispatch application `flywheel`, tool `report_feedback`, with the call_ref you received.",
@@ -90,7 +91,7 @@ function errorResult(error: unknown) {
 }
 
 export function buildMcpServer(core: GatewayCore, ctx: GatewayContext): McpServer {
-  const server = new McpServer({ name: "mcp-flywheel", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: "tooltuner", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });
 
   server.registerTool(
     "list_apps",
@@ -160,6 +161,7 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
   // Local tunnels use loopback. Hosted limits are endpoint-global and never
   // derive a security key from unverified forwarding headers.
   app.set("trust proxy", opts.trustProxy ?? "loopback");
+  app.use(canonicalBrowserOrigin(opts.publicOrigin));
   const limits = (endpoint: string): Partial<RateLimitOptions> => opts.rateLimitStore
     ? { store: opts.rateLimitStore(endpoint), keyGenerator: () => "gateway", passOnStoreError: false }
     : {};
@@ -172,7 +174,7 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
   oauthMetadata.token_endpoint_auth_methods_supported = ["none"];
   oauthMetadata.revocation_endpoint_auth_methods_supported = ["none"];
   app.use(mcpAuthMetadataRouter({ oauthMetadata, resourceServerUrl: resourceUrl,
-    scopesSupported: [FLYWHEEL_SCOPE], resourceName: "MCP Flywheel" }));
+    scopesSupported: [FLYWHEEL_SCOPE], resourceName: "ToolTuner" }));
   // Reject unsafe requested callbacks before SDK error redirects as well as
   // at the provider boundary (including malformed PKCE/resource requests).
   app.use("/authorize", express.urlencoded({ extended: false, limit: "16kb" }), (req: Request, res: Response, next: NextFunction) => {

@@ -16,12 +16,12 @@ function context(groups: ("management" | "development")[] = ["management"]): Ope
 }
 
 describe("coding credential boundaries", () => {
-  it.each(["VERCEL_TOKEN", "OWNER_TOKEN", "MANAGEMENT_TOKEN", "VERCEL_PROJECT_ID", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "NODE_OPTIONS", "HOME", "PATH", "GIT_CONFIG", "FLYWHEEL_DEVELOPMENT_TOKEN"])("rejects configured protected environment %s", (name) => {
+  it.each(["VERCEL_TOKEN", "OWNER_TOKEN", "MANAGEMENT_TOKEN", "VERCEL_PROJECT_ID", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "NODE_OPTIONS", "HOME", "PATH", "GIT_CONFIG", "FLYWHEEL_DEVELOPMENT_TOKEN", "TOOLTUNER_DEVELOPMENT_TOKEN", "TOOLTUNER_CREDENTIAL_KEYS"])("rejects configured protected environment %s", (name) => {
     expect(() => codingEnvironment({ ...config, environment: { [name]: "secret" }, environmentAllowlist: [name] }, "scoped", job)).toThrow(/forbidden or non-allowlisted/);
   });
   it("does not inherit ambient credentials and allows only explicitly configured runner auth", () => {
     const result = codingEnvironment({ ...config, environment: { CODEX_HOME: "/opt/runner" }, environmentAllowlist: ["CODEX_HOME"] }, "development-only", job);
-    expect(result).toEqual({ PATH: "/usr/bin:/bin", HOME: "/home/runner", LANG: "C.UTF-8", CODEX_HOME: "/opt/runner", FLYWHEEL_DEVELOPMENT_TOKEN: "development-only", FLYWHEEL_JOB_ID: job.job_id, FLYWHEEL_PACKET_ID: job.packet_id });
+    expect(result).toEqual({ PATH: "/usr/bin:/bin", HOME: "/home/runner", LANG: "C.UTF-8", CODEX_HOME: "/opt/runner", FLYWHEEL_DEVELOPMENT_TOKEN: "development-only", FLYWHEEL_JOB_ID: job.job_id, FLYWHEEL_PACKET_ID: job.packet_id, TOOLTUNER_DEVELOPMENT_TOKEN: "development-only", TOOLTUNER_JOB_ID: job.job_id, TOOLTUNER_PACKET_ID: job.packet_id });
     expect(() => codingEnvironment({ ...config, environment: { OPENAI_API_KEY: "runner-key" } }, "", job)).toThrow();
   });
 });

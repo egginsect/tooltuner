@@ -1,5 +1,5 @@
 /**
- * Flywheel OAuth authorization server provider (TOO-77).
+ * ToolTuner OAuth authorization server provider (TOO-77).
  *
  * Built on the MCP SDK's maintained handlers: metadata, dynamic client
  * registration, authorization code + PKCE (verified by the SDK), token,

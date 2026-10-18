@@ -56,7 +56,7 @@ export async function beginDeviceAccountLink(options: LinkOptions & {
     if (typeof endpoint !== "string" || secureUrl(endpoint, initial.account.environment).origin !== new URL(initial.account.issuer).origin ||
         !metadata.grant_types_supported?.includes("urn:ietf:params:oauth:grant-type:device_code")) throw new FlywheelError("forbidden", "The pinned issuer does not advertise a supported device authorization endpoint.");
     diagnostic = { stage: "client_registration" };
-    const client = await registerClient(initial.account.issuer, { metadata, clientMetadata: { client_name: "MCP Flywheel owner device link",
+    const client = await registerClient(initial.account.issuer, { metadata, clientMetadata: { client_name: "ToolTuner owner device link",
       redirect_uris: [], grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"], response_types: [], token_endpoint_auth_method: "none" },
       scope: initial.account.scopes.join(" "), fetchFn: credentialFetch(initial.account, remaining()) });
     if (client.issuer !== undefined && client.issuer !== initial.account.issuer) throw unavailable();

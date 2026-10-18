@@ -2,7 +2,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import { StorageError } from "./errors.js";
 import type { Lifecycle } from "./lifecycle.js";
 
-export const SERVICE_NAME = "mcp-flywheel-ts";
+export const SERVICE_NAME = "tooltuner";
 
 export interface StorageStatus {
   graph: string;

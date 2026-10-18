@@ -10,8 +10,8 @@ import * as schema from "../../src/db/schema.js";
 import { createGraphRateLimitStore } from "../../src/db/rate-limits.js";
 import type { Options } from "express-rate-limit";
 
-const hostedEnv = { FLYWHEEL_RUNTIME_MODE: "hosted", FALKORDB_URL: "rediss://graph.example:6379", FALKORDB_PASSWORD: "test-password",
-  FLYWHEEL_PUBLIC_ORIGIN: "https://gateway.example", FLYWHEEL_OWNER_SECRET: "test-only-owner-consent-secret-32-characters" };
+const hostedEnv = { TOOLTUNER_RUNTIME_MODE: "hosted", FALKORDB_URL: "rediss://graph.example:6379", FALKORDB_PASSWORD: "test-password",
+  TOOLTUNER_PUBLIC_ORIGIN: "https://gateway.example", TOOLTUNER_OWNER_SECRET: "test-only-owner-consent-secret-32-characters" };
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
@@ -37,12 +37,12 @@ function deferred<T>() {
 
 describe("hosted configuration", () => {
   it("requires explicit authenticated external TLS storage, fixed origin and strong consent secret", () => {
-    expect(() => loadConfig({ FLYWHEEL_RUNTIME_MODE: "hosted" })).toThrow(/external TLS endpoint/);
+    expect(() => loadConfig({ TOOLTUNER_RUNTIME_MODE: "hosted" })).toThrow(/external TLS endpoint/);
     const config = loadConfig(hostedEnv);
     expect(config.database).toMatchObject({ maxReconnectAttempts: 0, connectTimeoutMs: 3000, queryTimeoutMs: 5000 });
     expect(config.oauth.resource).toBe("https://gateway.example/mcp");
-    for (const extra of [{ FALKORDB_URL: "redis://graph.example:6379" }, { FLYWHEEL_PUBLIC_ORIGIN: "http://localhost:8787" },
-      { FALKORDB_PASSWORD: "" }, { FLYWHEEL_OWNER_SECRET: "a".repeat(20) }]) {
+    for (const extra of [{ FALKORDB_URL: "redis://graph.example:6379" }, { TOOLTUNER_PUBLIC_ORIGIN: "http://localhost:8787" },
+      { FALKORDB_PASSWORD: "" }, { TOOLTUNER_OWNER_SECRET: "a".repeat(20) }]) {
       expect(() => loadConfig({ ...hostedEnv, ...extra })).toThrow();
     }
   });
@@ -52,10 +52,10 @@ describe("hosted configuration", () => {
     }
   });
   it("supports transaction pooling without a mandatory mode declaration and bounds timeouts", () => {
-    const credentials = { FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION: "v1", FLYWHEEL_CREDENTIAL_POSTGRES_URL: "test", FLYWHEEL_CREDENTIAL_KEYS: "test" };
+    const credentials = { TOOLTUNER_CREDENTIAL_ACTIVE_KEY_VERSION: "v1", TOOLTUNER_CREDENTIAL_POSTGRES_URL: "test", TOOLTUNER_CREDENTIAL_KEYS: "test" };
     expect(loadConfig({ ...hostedEnv, ...credentials }).credentials.connectionMode).toBeUndefined();
-    expect(loadConfig({ ...hostedEnv, ...credentials, FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: "transaction" }).credentials.connectionMode).toBe("transaction");
-    expect(loadConfig({ ...hostedEnv, ...credentials, FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: "direct" }).credentials.connectionMode).toBe("direct");
+    expect(loadConfig({ ...hostedEnv, ...credentials, TOOLTUNER_CREDENTIAL_POSTGRES_CONNECTION_MODE: "transaction" }).credentials.connectionMode).toBe("transaction");
+    expect(loadConfig({ ...hostedEnv, ...credentials, TOOLTUNER_CREDENTIAL_POSTGRES_CONNECTION_MODE: "direct" }).credentials.connectionMode).toBe("direct");
     expect(() => loadConfig({ ...hostedEnv, FALKORDB_CONNECT_TIMEOUT_MS: "0" })).toThrow();
     expect(() => loadConfig({ ...hostedEnv, FALKORDB_QUERY_TIMEOUT_MS: "999999" })).toThrow();
   });
@@ -64,6 +64,11 @@ describe("hosted configuration", () => {
     await expect(createRuntime({ config: loadConfig(hostedEnv), db: {} as GraphClient,
       integrations: { repositories: [{ repoId: "test" } as never] } })).rejects.toThrow(/cannot run local jobs/);
     expect(bootstrap).not.toHaveBeenCalled();
+  });
+  it("rejects conflicting runtime aliases before opening storage", async () => {
+    const connect = vi.spyOn(GraphClient, "connect");
+    await expect(startHostedRuntime({ ...hostedEnv, FLYWHEEL_RUNTIME_MODE: "local" })).rejects.toThrow(/conflict/);
+    expect(connect).not.toHaveBeenCalled();
   });
   it("closes a partially started database when composition fails", async () => {
     const close = vi.fn(async () => undefined);

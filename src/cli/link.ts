@@ -131,7 +131,7 @@ export async function beginUpstreamAccountLink(options: LinkOptions & {
       client = bundle.success ? bundle.data.client : OAuthClientInformationSchema.parse(external);
       if (client.issuer !== options.account.issuer || client.client_id !== options.account.client_id) throw new FlywheelError("forbidden", "Pre-registered client belongs to another issuer.");
     } else {
-      client = await registerClient(options.account.issuer, { metadata, clientMetadata: { client_name: "MCP Flywheel owner link", redirect_uris: [redirectUri],
+      client = await registerClient(options.account.issuer, { metadata, clientMetadata: { client_name: "ToolTuner owner link", redirect_uris: [redirectUri],
         grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" }, scope: options.account.scopes.join(" "),
       fetchFn: credentialFetch(issuerConfig, Math.min(timeoutMs, 30_000)) });
     }

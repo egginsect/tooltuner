@@ -1,8 +1,8 @@
 {
-  "name": "mcp-flywheel-ts",
+  "name": "tooltuner",
   "version": "0.1.0",
   "private": true,
-  "description": "MCP Flywheel TS: graph-backed gateway and improvement loop for MCP applications (Graph Hacks demo).",
+  "description": "ToolTuner: graph-backed gateway and improvement loop for MCP applications (Graph Hacks demo).",
   "type": "module",
   "engines": {
     "node": "24.x"

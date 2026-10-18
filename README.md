@@ -1,4 +1,4 @@
-# MCP Flywheel TS
+# ToolTuner
 
 A TypeScript MCP gateway with FalkorDB for graph state and optional PostgreSQL for encrypted upstream credentials. Clients keep one
 logical `/mcp` connection and use exactly three outer tools: `list_apps`, `describe`, and
@@ -56,7 +56,8 @@ the HTTP listener, and close storage. `/healthz` checks the real schema/storage;
 or draining process returns 503. A healthy database alone does not mean OAuth, upstream linking,
 jobs, or previews are configured. Read the startup readiness report.
 
-Configuration keys are documented in [.env.example](.env.example). Supply secrets from the
+Configuration uses `TOOLTUNER_*` keys documented in [.env.example](.env.example).
+See [configuration migration and automatic Vercel origins](docs/configuration.md). Supply secrets from the
 operator's credential environment; never copy credentials or deployment state between checkouts.
 The process does not automatically load `.env` files. With no public origin and owner consent
 secret it serves health only. Follow the [operator runbook](docs/demo.md) to register fixtures,

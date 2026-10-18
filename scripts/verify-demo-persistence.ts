@@ -1,4 +1,5 @@
 /** Verify persisted state and production service restart inside the disposable demo graph. */
+import { resolveToolTunerEnvironment } from "../src/config.js";
 import assert from "node:assert/strict";
 import { GraphClient } from "../src/db/client.js";
 import { getCall, getPacket, getRecord } from "../src/db/evidence.js";
@@ -24,7 +25,8 @@ const { spawn } = await import("node:child_process");
 const { fileURLToPath } = await import("node:url");
 const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
 const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
-const origin = process.env.FLYWHEEL_PUBLIC_ORIGIN!;
+const environment = resolveToolTunerEnvironment(process.env);
+const origin = environment.TOOLTUNER_PUBLIC_ORIGIN!;
 let stopActiveServer: (() => Promise<void>) | undefined;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
@@ -34,7 +36,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 for (let generation = 1; generation <= 2; generation++) {
   const child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("../src/server.ts", import.meta.url))], {
     env: { PATH: process.env.PATH, HOST: "127.0.0.1", PORT: new URL(origin).port,
-      FLYWHEEL_PUBLIC_ORIGIN: origin, FLYWHEEL_OWNER_SECRET: process.env.FLYWHEEL_OWNER_SECRET,
+      TOOLTUNER_PUBLIC_ORIGIN: origin, TOOLTUNER_OWNER_SECRET: environment.TOOLTUNER_OWNER_SECRET,
       FALKORDB_GRAPH: input.graph, FALKORDB_URL: process.env.FALKORDB_URL,
       ...(process.env.FALKORDB_USERNAME ? { FALKORDB_USERNAME: process.env.FALKORDB_USERNAME } : {}),
       ...(process.env.FALKORDB_PASSWORD ? { FALKORDB_PASSWORD: process.env.FALKORDB_PASSWORD } : {}) },

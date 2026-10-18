@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Express } from "express";
-import { loadConfig } from "./config.js";
+import { loadConfig, resolveToolTunerEnvironment } from "./config.js";
 import { GraphClient } from "./db/client.js";
 import { createRuntime } from "./runtime.js";
 
@@ -11,7 +11,8 @@ export interface HostedRuntime {
 
 /** Compose request-only services. No listener, signal handlers, or public-origin probe. */
 export async function startHostedRuntime(environment: NodeJS.ProcessEnv = process.env): Promise<HostedRuntime> {
-  const config = loadConfig({ ...environment, FLYWHEEL_RUNTIME_MODE: "hosted" });
+  environment = resolveToolTunerEnvironment(environment);
+  const config = loadConfig({ ...environment, FLYWHEEL_RUNTIME_MODE: undefined, TOOLTUNER_RUNTIME_MODE: "hosted" });
   const db = await GraphClient.connect(config.database);
   try {
     const runtime = await createRuntime({ config, db, environment });
