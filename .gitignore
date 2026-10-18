@@ -155,3 +155,6 @@ vite.config.ts.timestamp-*
 dump.rdb
 appendonlydir/
 tmp/
+
+# Operator-only runtime paths and external credential references.
+config/runtime.json

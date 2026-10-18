@@ -46,8 +46,8 @@ export function configReadiness(config: Config): ReadinessItem[] {
     name: "upstream_linking",
     status: "not_configured",
     critical: false,
-    detail: "Upstream account linking is unavailable in the auth-only layer; local fixtures need no account",
-    action: "Use the later gateway/runtime layer for owner account linking and credential mediation",
+    detail: "No upstream credential store configured; local fixtures need no account",
+    action: "Configure credentialStore in RUNNER_CONFIG_PATH and use the owner account link command (docs/demo.md)",
   });
 
   items.push(

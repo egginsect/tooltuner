@@ -4,6 +4,11 @@
 errors. This page explains it. If the two disagree, the code wins. Fix the page in
 the same change.
 
+`src/runtime.ts` composes the real gateway, durable recorder, evidence/feedback/packet
+handlers and configured job/experiment adapters. Later module indexes are bootstrapped in
+that composition layer; the auth layer's schema registry remains auth-only. Unconfigured
+operations are omitted from discovery and remain explicitly unavailable on dispatch.
+
 ## Outer API (the only three MCP tools)
 
 | Tool | Input | Output |

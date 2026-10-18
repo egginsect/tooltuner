@@ -1,5 +1,10 @@
 # Decisions and delivery gates (TOO-63)
 
+Integration status (2026-10-17): local TypeScript/SDK/FalkorDB checks are tracked in
+`docs/verification.md`; the executable local exercise is `npm run demo`. The public HTTPS,
+real hosted-client, coding-runner and verified preview receipts required below remain pending.
+The contest's local-setup/video allowance does not replace these project acceptance gates.
+
 The owner confirmed the following:
 - Fresh TypeScript implementation, one Flywheel process, and FalkorDB as the only persistent shared state.
 - The Python repository is a read-only behavior reference. Nothing is ported or copied from it.
@@ -40,27 +45,27 @@ The owner confirmed the following:
 
 ## Configuration and external readiness checklist
 
-Secrets are referenced by environment variable name only. The readiness output reports presence, never values.
+Secrets stay in the process credential environment or an external credential helper. Runtime JSON contains references, not credential values. Readiness reports presence, never values.
 
 | Item | Config | Agent-runnable? |
 |---|---|---|
-| Public origin | `PUBLIC_BASE_URL` (fixed tunnel hostname) | Needs the owner's ngrok (or other tunnel) account. |
-| OAuth issuer, resource, redirect | Derived from `PUBLIC_BASE_URL`. The issuer, resource (`/mcp`) and metadata must all match. | Yes |
-| Owner consent | `OWNER_CONSENT_SECRET_REF` (env var name) | The owner sets the value. |
+| Public origin | `FLYWHEEL_PUBLIC_ORIGIN` (fixed tunnel hostname) | Needs the owner's ngrok (or other tunnel) account. |
+| OAuth issuer, resource, redirect | Derived from `FLYWHEEL_PUBLIC_ORIGIN`. The issuer, resource (`/mcp`) and metadata must all match. | Yes |
+| Owner consent | `FLYWHEEL_OWNER_SECRET` (secret environment value) | The owner sets the value. |
 | FalkorDB | `FALKORDB_URL` | Yes (docker compose) |
-| Allowlisted repos and base SHAs | `config/runtime.json` | Yes |
-| Vercel project | `VERCEL_PROJECT_ID`, `VERCEL_ORG_ID`, `VERCEL_TOKEN` (manager only) | Needs the owner's `vercel login` or token. |
-| Coding CLI runner | `RUNNER_COMMAND` | Uses the runner's own authentication. |
+| Allowlisted repos and base SHAs | `RUNNER_CONFIG_PATH` JSON | Yes |
+| Vercel project | `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`, `VERCEL_TOKEN` (manager only) | Needs the owner's `vercel login` or token. |
+| Coding CLI runner | `RUNNER_CONFIG_PATH` allowlisted executable/config | Uses the runner's own authentication. |
 
 ## Python reference mapping (behavior only)
 
 | Python concern | TypeScript entry point |
 |---|---|
-| Preflight and config | `src/config.ts`, `npm run readiness` |
+| Preflight and config | `src/config.ts`, startup readiness report |
 | Database bootstrap | `src/db/` index bootstrap |
 | Login and operator | `src/gateway/oauth/*` consent page and owner CLI `src/cli/owner.ts` |
 | Gateway | `src/gateway/*` (outer tools, registry, dispatch) |
-| Upstream registration | `config/runtime.json` seed of v1 plus `register_preview` |
+| Upstream registration | `FIXTURE_REGISTRY_PATH` explicit v1 seed plus `register_preview` |
 
 PostgreSQL, OTel, Jaeger, Tempo and the packet scripts are not carried over.
 
