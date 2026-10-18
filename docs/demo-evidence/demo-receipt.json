@@ -1,0 +1,60 @@
+{
+  "recorded_at": "2026-10-18T15:47:56.996Z",
+  "evidence_type": "real-local-sdk-and-falkordb",
+  "graph_cleanup": "deleted after run",
+  "checks": [
+    "generic live-catalog enrollment leaves stable unchanged; owner explicitly activates baseline",
+    "health and unauthenticated MCP challenge",
+    "one SDK client routes stable 2 -> pinned candidate 3 -> unchanged stable 2",
+    "four real local OAuth grants, filtered inner catalogs and direct-dispatch denials",
+    "real fixture call, idempotent replay, durable feedback, packet ACK and evidence read",
+    "durable call-feedback-packet linkage and deterministic comparison: baseline fail, candidate pass",
+    "owner-only activation changes same-client default to 3; stale decision rejected; rollback restores 2",
+    "packet-scoped development read and OAuth refresh",
+    "refreshed access token performs a real SDK call",
+    "independent child process verifies persisted call, packet, comparison, stable pointer and owner decisions",
+    "production service process stops and restarts; existing tokens dispatch and read original evidence after both starts",
+    "second independent app",
+    "storage disconnect returns 503; fresh composition reads persisted records and accepts existing token",
+    "draining health returns 503"
+  ],
+  "fixture_notice": "Synthetic read-only data; prewritten corrected reference, not an agent-generated change or hosted preview.",
+  "transcript": {
+    "input": {
+      "text": "alpha  beta\ngamma"
+    },
+    "expected": 3,
+    "stable": 2,
+    "pinned_candidate": 3,
+    "stable_after_comparison": 2,
+    "after_owner_activation": 3,
+    "after_owner_rollback": 2,
+    "same_client": true,
+    "comparison": [
+      "fail",
+      "pass"
+    ]
+  },
+  "refs": {
+    "call": "call",
+    "candidate_call": "candidate-call",
+    "feedback": "feedback",
+    "packet": "packet",
+    "evaluation": "evaluation",
+    "baseline_version": "baseline-version",
+    "candidate_version": "candidate-version",
+    "activation": "activation",
+    "rollback": "rollback"
+  },
+  "pending": [
+    "fixed public HTTPS",
+    "ChatGPT and Claude consent/calls/refresh",
+    "owner upstream account linking",
+    "real coding CLI isolation and start receipt",
+    "existing-project Vercel verified preview",
+    "real coding-generated candidate and hosted preview comparison",
+    "production owner decisions"
+  ],
+  "publication_note": "Public evidence summary of a real local run. Synthetic record identifiers are consistently replaced with semantic labels; raw evidence is retained separately.",
+  "source_verification": "The tracked source tree matched the reviewed branding candidate. The only untracked checkout entry was a dependency symlink; no tracked source edits were present."
+}

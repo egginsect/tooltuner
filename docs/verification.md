@@ -1,5 +1,7 @@
 # Verification and delivery readiness
 
+This page records historical local checks from 2026-10-17. It is not a certification of the current branch or a substitute for rerunning its tests. It excludes private service identifiers and generated receipt details.
+
 ## Evidence ledger
 
 This ledger distinguishes code/DB/SDK checks from real hosted-client and provider receipts.
@@ -50,18 +52,18 @@ The [official Graph Hacks FAQ](https://www.wemakedevs.org/hackathons/falkordb), 
 allows coding assistants with owner responsibility. It requires FalkorDB to be central; it prefers
 a live deployment and otherwise requires complete local setup plus a working video. Its closing
 time is 2026-10-18 23:59 IST (18:29 UTC). Those contest allowances do not relax this project's
-stricter actual public OAuth, hosted-client and preview receipts. Submission is not authorized.
+stricter actual public OAuth, hosted-client and preview receipt requirements. Confirm the current contest rules directly before submission.
 
 | Item | State |
 |---|---|
-| Private repository | Retain private visibility |
-| Project license | Apache-2.0 proposed; owner decision and final LICENSE review pending |
+| Repository visibility | Verify the intended release state with the repository owner |
+| Project license | Confirm the repository license and preserve required notices before distribution |
 | Third-party dependencies | Pinned by `package-lock.json`; 227 package entries all contain declared license metadata; rights/notice review pending |
 | Direct runtime packages | MCP SDK, ajv, ajv-formats, Express, express-rate-limit, FalkorDB client, zod |
 | Development packages | TypeScript, tsx, Vitest, Node/Express types |
 | Fixture/media rights | Synthetic fixtures; inspect captured media for account/third-party rights before release |
 | Sensitive material | `.env*`, deployment state, tokens, PII and browser sessions excluded; inspect any receipt before sharing |
-| Publication/marketplace/contest | Not authorized; no submission or visibility change |
+| Publication/marketplace/contest | Review the release contents and obtain the repository owner’s approval |
 
 ## Local integration results (2026-10-17)
 
@@ -75,13 +77,7 @@ The lead ran the whole suite from 22:14:00 to 22:14:24.52 UTC:
 
 Tests ran real bubblewrap and a Node child on this host. That proves the exercised local isolation/start path; an actual authenticated coding CLI and a real job-produced deployment remain unverified. Credential-helper tests used synthetic local OAuth accounts, never real provider credentials. The prior fresh isolated offline locked install succeeded with 158 packages and a working tsx transform; npm's existing install-script approval policy was not bypassed.
 
-The current credential-free standalone demo receipt was captured at `2026-10-17T22:15:10.954Z` against checkout base `5928aef258da985ebaf2e938a4392ca2dcc616f8` with `dirty_checkout:true`. Its own UUID graph was deleted after persisted readback through fresh service composition. This is local SDK evidence, not committed artifact or provider provenance:
-
-| Ref | Actual local value |
-|---|---|
-| call | `call_00mvcyg0a5cb0fe8e8c72059f7` |
-| feedback | `fb_00mvcyg0dvf61af313e1d028a0` |
-| packet | `pkt_00mvcyg0ft932bf003e01c35d1` |
+The historical credential-free standalone demo verified persisted readback through fresh service composition before deleting its temporary UUID-scoped graph. It is local SDK evidence, not provider or hosted-client provenance. Generated receipt identifiers and checkout metadata are intentionally omitted from this public summary.
 
 The demo exercised authenticated grant selection without unauthenticated metadata disclosure, four group catalogs and direct-call denials, exact v1 pin and missing-version failure, idempotent replay, durable feedback/packet ACK, scoped reads with outside-packet and nonexistent refs hidden identically, refresh, the second app, storage-disconnect 503, persisted records/tokens after fresh composition, and drain health.
 
@@ -116,8 +112,8 @@ terms review; their licenses are not inferred from the npm client package.
 | `vitest` | 5.0.5 | MIT |
 
 
-## Delivery
+## Delivery and interpretation
 
-The independent foundation tip `5928aef258da985ebaf2e938a4392ca2dcc616f8` passed a clean-environment offline locked install, typecheck, 10 unit checks and 9 real UUID-graph checks at 22:02 UTC. It is [draft PR #1](https://github.com/tooltuner/mcp-flywheel-oss/pull/1), based on unchanged `main` at `3c290a7`.
+The earlier foundation checks included a clean-environment offline locked install, typecheck, unit tests and UUID-scoped graph integration checks. Those historical checks apply to the tested source snapshot; they do not establish that later changes passed the same suite.
 
-After final acceptance, the authorized draft stack is foundation → auth → gateway → evidence → jobs → runtime/docs. The repository remains private. PR delivery does not authorize merge, stable activation, publication or contest submission. Full M1 acceptance remains pending the actual external receipts above.
+For the current checkout, follow the documented setup and rerun the relevant checks. Review the Auth and credential-isolation documentation for their specific validation requirements. Local or synthetic tests do not establish successful hosted-client consent, authenticated provider access, or deployment receipts. Review all publication material for credentials, account identifiers and private service details before sharing.
