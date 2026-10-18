@@ -1,0 +1,104 @@
+{
+  "title": "ToolTuner: real feedback, separate MCP repository, callable preview",
+  "evidence_type": "Sanitized actual MCP SDK/HTTP run; repeated repair using previously confirmed human feedback",
+  "input": {
+    "text": "alpha  beta\ngamma"
+  },
+  "timeline": [
+    {
+      "at": "2026-10-18T17:01:53.133Z",
+      "step": "owner_public_preview_enrollment",
+      "label": "public-baseline",
+      "application": "textkit",
+      "stable_changed": false,
+      "verification": "Live Vercel provider metadata and actual MCP catalog"
+    },
+    {
+      "at": "2026-10-18T17:02:13.516Z",
+      "step": "wrapped_call",
+      "selection": "default_baseline",
+      "count": 2
+    },
+    {
+      "at": "2026-10-18T17:02:26.164Z",
+      "step": "prior_human_confirmation_reused",
+      "summary": "The user previously confirmed this input contains three words.",
+      "observed": 2,
+      "expected": 3,
+      "new_user_response": false
+    },
+    {
+      "at": "2026-10-18T17:02:31.404Z",
+      "step": "packet_frozen",
+      "missing_refs": []
+    },
+    {
+      "at": "2026-10-18T17:02:36.577Z",
+      "step": "evidence_retrieved_through_MCP",
+      "missing_refs": []
+    },
+    {
+      "at": "2026-10-18T17:06:18.888Z",
+      "step": "owner_public_preview_enrollment",
+      "label": "feedback-whitespace-fix",
+      "application": "textkit",
+      "stable_changed": false,
+      "verification": "Live Vercel provider metadata and actual MCP catalog"
+    },
+    {
+      "at": "2026-10-18T17:06:33.795Z",
+      "step": "wrapped_call",
+      "selection": "default_baseline",
+      "count": 2
+    },
+    {
+      "at": "2026-10-18T17:06:43.201Z",
+      "step": "wrapped_call",
+      "selection": "pinned_candidate",
+      "count": 3
+    },
+    {
+      "at": "2026-10-18T17:06:53.425Z",
+      "step": "wrapped_call",
+      "selection": "default_baseline",
+      "count": 2
+    },
+    {
+      "at": "2026-10-18T17:07:04.796Z",
+      "step": "evidence_retrieved_through_MCP",
+      "missing_refs": []
+    }
+  ],
+  "verification": {
+    "same_graph_entire_workflow": true,
+    "four_calls_same_client_and_session": true,
+    "actual_results": [
+      2,
+      2,
+      3,
+      2
+    ],
+    "candidate_parent_is_public_baseline": true,
+    "no_missing_refs": true,
+    "default_activation_after_initialization": false,
+    "new_test_grants_revoked_after_readback": true,
+    "private_checkpoint_restore_verified": true
+  },
+  "limitations": [
+    "The human confirmation was reused explicitly from an earlier demonstration, not presented as a new user response.",
+    "The assistant read the packet and authored the PR externally; no built-in autonomous runner is claimed.",
+    "Owner enrollment records source and parent version. The coding PR is external evidence; no packet-to-candidate graph edge is claimed.",
+    "Candidate remained unactivated. No generalized performance claim."
+  ],
+  "privacy": "User wording, opaque trace/session/graph identifiers, source hashes, provider account IDs and local paths are omitted.",
+  "external_coding_step": {
+    "repository": "Separate standalone test MCP repository",
+    "pull_request_number": 2,
+    "source_file": "src/demo-mcp.ts",
+    "before": "text.split(\" \").filter(Boolean).length",
+    "after": "text.match(/\\S+/gu)?.length ?? 0",
+    "deployment": "Actual Git-triggered Vercel Preview, READY",
+    "test_result": "16 tests and typecheck passed",
+    "ordering": "Packet retrieved before correction; Preview verified before candidate enrollment."
+  }
+}
