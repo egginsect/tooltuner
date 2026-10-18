@@ -72,6 +72,18 @@ This configuration does not create a project or deploy anything.
 
 ## Architecture and review
 
+### Interactive architecture diagram
+
+Download [the standalone HTML diagram](docs/architecture.html) and open it in a browser;
+GitHub's source viewer does not run the interactive page. It works offline.
+The [editable Archify JSON](docs/architecture.json) is included alongside it.
+
+This source-based overview distinguishes the request-only hosted gateway from optional local
+workers. Transaction-pooler credential refresh is implemented and tested in the review PR
+stack, not a claim of merged main or live rollout. Supabase Auth remains planned.
+Schema, layout and artifact checks passed; browser visual review was blocked by the execution
+environment. The diagram contains no private deployment endpoints or upstream identities.
+
 `src/server.ts` owns process signals and startup reporting; `src/runtime.ts` composes the real
 services and all module indexes. Gateway and flywheel modules share contracts and grant policy,
 without importing each other. Cypher stays in `src/db`; writes are acknowledged only after
@@ -95,3 +107,4 @@ not authorized by this preparation.
 Optional upstream OAuth custody: [PostgreSQL encryption, exact-target bindings and refresh recovery](docs/postgres-credentials.md).
 
 For protected MCP servers without token introspection, see [standard OAuth owner linking](docs/standard-oauth.md) for explicit PKCE/device acquisition, encrypted custody and selected-tool remote enrollment.
+
