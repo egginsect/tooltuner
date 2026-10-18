@@ -1,18 +1,21 @@
 /** Local SDK evidence only. No hosted-client, coding-runner or deployment receipt is simulated. */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { startFixtureServer, REPRODUCTION } from "../fixtures/server.js";
-import { seedConfiguredFixtures } from "../fixtures/registry.js";
+import { enrollLocalApplication } from "../src/cli/enroll.js";
+import { activateVersion, rollbackVersion } from "../src/cli/versions.js";
+import { getStable } from "../src/db/registry.js";
 import { loadConfig } from "../src/config.js";
 import { Grant, newId, type ToolGroup } from "../src/contracts.js";
 import { GraphClient } from "../src/db/client.js";
 import { insertGrant } from "../src/db/auth.js";
-import { getCall, getPacket } from "../src/db/evidence.js";
+import { getCall, getPacket, getRecord } from "../src/db/evidence.js";
 import { createRuntime } from "../src/runtime.js";
 
 type Json = Record<string, unknown>;
@@ -40,18 +43,34 @@ export async function runLocalDemo() {
     const origin = `http://127.0.0.1:${address.port}`;
     const ownerSecret = randomBytes(32).toString("base64url");
     const config = loadConfig({ FLYWHEEL_PUBLIC_ORIGIN: origin, FLYWHEEL_OWNER_SECRET: ownerSecret, FALKORDB_GRAPH: graph });
-    let runtime = await createRuntime({ config, db });
+    const integrations = { experimentConfigs: [{ ref: "config:local-demo-readonly-v1",
+      fixtureStateRef: "fixture:pure-word-count-v1", maxVersions: 2,
+      expectedOutput: { content: [{ type: "text", text: JSON.stringify(REPRODUCTION.expected) }], structuredContent: REPRODUCTION.expected } }] };
+    let runtime = await createRuntime({ config, db, integrations });
     server.on("request", runtime.app);
-    const seeded = await seedConfiguredFixtures(db, { owner_id: "owner", baseUrl: fixture.baseUrl,
-      source: { repo_id: "tooltuner/mcp-flywheel-oss", commit_sha: sourceCommit }, initializeStable: true });
-    assert.equal(seeded.versions.length, 2);
+    const owner = { owner_id: "owner", subject: "local-demo-operator" };
+    const source = { repo_id: "egginsect/mcp-flywheel-oss", commit_sha: sourceCommit };
+    const enroll = (application: string, description: string, label: string, parent: string | null = null) =>
+      enrollLocalApplication(db!, owner, { application, description, label, source,
+        url: `${fixture.baseUrl}/${application}/${label}/mcp`, deployment_id: `local:${application}:${label}`,
+        parent_version_id: parent });
+    const stableVersion = await enroll("textkit", "Synthetic word-count defect reproduction", "v1");
+    assert.equal(await getStable(db, "owner", "textkit"), null, "Enrollment must not activate");
+    const initialDecision = await activateVersion(db, owner, { application: "textkit", selected_version_id: stableVersion.version_id,
+      expected_current_version_id: null, receipt: { purpose: "Disposable local demo baseline" } });
+    const candidateVersion = await enroll("textkit", "Synthetic word-count defect reproduction", "example-v2", stableVersion.version_id);
+    const catalogVersion = await enroll("catalog", "Synthetic independent capability catalog", "v1");
+    await activateVersion(db, owner, { application: "catalog", selected_version_id: catalogVersion.version_id,
+      expected_current_version_id: null, receipt: { purpose: "Disposable local demo catalog" } });
+    assert.equal((await getStable(db, "owner", "textkit"))?.version_id, stableVersion.version_id);
+    checks.push("generic live-catalog enrollment leaves stable unchanged; owner explicitly activates baseline");
     assert.equal((await fetch(`${origin}/healthz`)).status, 200);
     assert.equal((await fetch(`${origin}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 401);
     checks.push("health and unauthenticated MCP challenge");
 
     async function connect(groups: ToolGroup[], scope: Json = {}, owner = "owner") {
       const grant = Grant.parse({ schema_version: 1, grant_id: newId("grant"), owner_id: owner,
-        label: `local-sdk-${groups.join("-")}`, groups, allow: { apps: ["textkit", "catalog"], tools: {}, repos: ["tooltuner/mcp-flywheel-oss"] },
+        label: `local-sdk-${groups.join("-")}`, groups, allow: { apps: ["textkit", "catalog"], tools: {}, repos: ["egginsect/mcp-flywheel-oss"] },
         scope, created_at: new Date().toISOString(), revoked_at: null });
       await insertGrant(db!, grant);
       const registration = await fetch(`${origin}/register`, { method: "POST", headers: { "content-type": "application/json" },
@@ -128,6 +147,15 @@ export async function runLocalDemo() {
     assert.equal(((baseline.result as Json).structuredContent as Json).count, 2);
     const pinned = await call(user.client, "dispatch", { application: "textkit", version: "v1", tool: "word_count", args: { ...REPRODUCTION.args } });
     assert.equal(pinned.resolved_version, baseline.resolved_version);
+    const candidate = await call(user.client, "dispatch", { application: "textkit", version: candidateVersion.version_id,
+      tool: "word_count", args: { ...REPRODUCTION.args } });
+    assert.equal(candidate.outcome, "success");
+    assert.equal(candidate.resolved_version, candidateVersion.version_id);
+    assert.equal(((candidate.result as Json).structuredContent as Json).count, 3);
+    const unchanged = await dispatch(user.client, "textkit", "word_count", { ...REPRODUCTION.args });
+    assert.equal(unchanged.resolved_version, stableVersion.version_id);
+    assert.equal(((unchanged.result as Json).structuredContent as Json).count, 2);
+    checks.push("one SDK client routes stable 2 -> pinned candidate 3 -> unchanged stable 2");
     const missingVersion = await call(user.client, "dispatch", { application: "textkit", version: "not-registered", tool: "word_count", args: { ...REPRODUCTION.args } });
     assert.equal((missingVersion.error as Json).code, "version_unavailable");
     const replay = await dispatch(user.client, "textkit", "word_count", { ...REPRODUCTION.args }, "local-baseline");
@@ -151,6 +179,54 @@ export async function runLocalDemo() {
     await denied(management.client, "get_evidence", { refs: [baseline.call_ref] });
     for (const session of [user, development, management, union]) for (const tool of ["merge", "activate", "rollback"]) await denied(session.client, tool);
     checks.push("four real local OAuth grants, filtered inner catalogs and direct-dispatch denials", "real fixture call, idempotent replay, durable feedback, packet ACK and evidence read");
+    const frozen = await getPacket(db, "owner", packetResult.packet_id as string);
+    assert(frozen);
+    assert.equal(frozen.completeness.status, "complete");
+    assert.deepEqual(frozen.missing_refs, []);
+    assert.deepEqual(frozen.reproduction, { tool: "word_count", args: { ...REPRODUCTION.args } });
+    assert.equal(frozen.expected_outcome, "3");
+    assert.equal(frozen.snapshot.calls[0]?.call_id, baseline.call_ref);
+    assert.equal(frozen.snapshot.feedback[0]?.feedback_id, feedbackResult.feedback_id);
+    const frozenOutput = frozen.snapshot.evidence.find((item) => item.kind === "call_output");
+    assert(frozenOutput);
+    assert.deepEqual(JSON.parse(frozenOutput.content_json as string), baseline.result);
+    assert.equal(frozen.parent_version_id, stableVersion.version_id);
+    assert.deepEqual(frozen.call_refs, [baseline.call_ref]);
+    assert.deepEqual(frozen.feedback_ids, [feedbackResult.feedback_id]);
+    assert.equal((await getCall(db, "owner", candidate.call_ref as string))?.resolved_version, candidateVersion.version_id);
+    const context = await dispatch(development.client, "flywheel", "get_context", { application: "textkit", call_ref: baseline.call_ref, limit: 50 });
+    assert.equal(context.outcome, "success");
+    const lineage = (context.result as Json).lineage as Json[];
+    for (const [from, rel, to] of [[baseline.call_ref, "RESOLVED", stableVersion.version_id],
+      [feedbackResult.feedback_id, "ABOUT", baseline.call_ref], [packetResult.packet_id, "INCLUDES", baseline.call_ref]]) {
+      assert(lineage.some((edge) => edge.from === from && edge.rel === rel && edge.to === to), `Missing ${rel} lineage`);
+    }
+    const comparison = await dispatch(management.client, "flywheel", "run_experiment", {
+      application: "textkit", version_ids: [stableVersion.version_id, candidateVersion.version_id],
+      input_ref: baseline.call_ref, criterion_ref: "criterion:expected-output",
+      config_ref: "config:local-demo-readonly-v1", idempotency_key: "local-demo-comparison" });
+    assert.equal(comparison.outcome, "success");
+    const evaluationId = (comparison.result as Json).evaluation_id as string;
+    const comparisonRead = await dispatch(management.client, "flywheel", "get_experiment", { evaluation_id: evaluationId });
+    assert.equal(comparisonRead.outcome, "success");
+    const evaluation = (comparisonRead.result as Json).evaluation as Json;
+    assert.deepEqual((evaluation.results as Json[]).map((row) => row.task_outcome), ["fail", "pass"]);
+    assert.equal((await getStable(db, "owner", "textkit"))?.version_id, stableVersion.version_id);
+    const activation = await activateVersion(db, owner, { application: "textkit", selected_version_id: candidateVersion.version_id,
+      expected_current_version_id: stableVersion.version_id, receipt: { purpose: "Disposable local demo activation", evaluation_id: evaluationId } });
+    const activated = await dispatch(user.client, "textkit", "word_count", { ...REPRODUCTION.args });
+    assert.equal(activated.resolved_version, candidateVersion.version_id);
+    assert.equal(((activated.result as Json).structuredContent as Json).count, 3);
+    await assert.rejects(activateVersion(db, owner, { application: "textkit", selected_version_id: stableVersion.version_id,
+      expected_current_version_id: stableVersion.version_id, receipt: { purpose: "Reject stale operator state" } }),
+      (error: unknown) => (error as { shape?: { code?: string } }).shape?.code === "stale_expected_current");
+    const rollback = await rollbackVersion(db, owner, { application: "textkit", selected_version_id: stableVersion.version_id,
+      expected_current_version_id: candidateVersion.version_id, receipt: { purpose: "Disposable local demo rollback" } });
+    const rolledBack = await dispatch(user.client, "textkit", "word_count", { ...REPRODUCTION.args });
+    assert.equal(rolledBack.resolved_version, stableVersion.version_id);
+    assert.equal(((rolledBack.result as Json).structuredContent as Json).count, 2);
+    checks.push("durable call-feedback-packet linkage and deterministic comparison: baseline fail, candidate pass",
+      "owner-only activation changes same-client default to 3; stale decision rejected; rollback restores 2");
     const scoped = await connect(["development"], { packet_id: packetResult.packet_id });
     const outsidePacket = await dispatch(user.client, "textkit", "word_count", { text: "Outside the frozen packet" });
     const nonexistent = newId("call");
@@ -161,27 +237,61 @@ export async function runLocalDemo() {
     const refreshed = await fetch(`${origin}/token`, form({ grant_type: "refresh_token", client_id: user.clientId,
       refresh_token: user.tokens.refresh_token, resource: `${origin}/mcp` }));
     assert.equal(refreshed.status, 200);
-    checks.push("packet-scoped development read and OAuth refresh");
+    const refreshedTokens = await refreshed.json() as { access_token: string };
+    const refreshedClient = new Client({ name: "refreshed-local-demo", version: "1.0.0" });
+    await refreshedClient.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${refreshedTokens.access_token}` } },
+    }));
+    clients.push(refreshedClient);
+    assert.equal((await dispatch(refreshedClient, "textkit", "word_count", { ...REPRODUCTION.args })).outcome, "success");
+    checks.push("packet-scoped development read and OAuth refresh", "refreshed access token performs a real SDK call");
     const second = await dispatch(user.client, "catalog", "capabilities", {});
     assert.equal(second.outcome, "success");
     await db.close();
     assert.equal((await fetch(`${origin}/healthz`)).status, 503);
     db = await GraphClient.connect({ url: process.env.FALKORDB_URL ?? "redis://127.0.0.1:6379", graph,
       username: process.env.FALKORDB_USERNAME, password: process.env.FALKORDB_PASSWORD });
-    runtime = await createRuntime({ config, db });
+    runtime = await createRuntime({ config, db, integrations });
     server.removeAllListeners("request"); server.on("request", runtime.app);
     assert.equal((await fetch(`${origin}/healthz`)).status, 200);
     assert.equal((await getCall(db, "owner", baseline.call_ref as string))?.outcome, "success");
     assert.equal((await getPacket(db, "owner", packetResult.packet_id as string))?.digest, packetResult.digest);
+    assert.equal((await getStable(db, "owner", "textkit"))?.version_id, stableVersion.version_id);
+    for (const decision of [initialDecision, activation, rollback]) {
+      assert.equal((await getRecord(db, "owner", decision.decision_id))?.record.kind, decision.kind);
+    }
+    assert.equal((await getRecord(db, "owner", evaluationId))?.record.state, "completed");
     const reconnect = await call(development.client, "list_apps", {});
     assert((reconnect.apps as Json[]).some((app) => app.application === "flywheel"));
+    assert.equal((await dispatch(refreshedClient, "textkit", "word_count", { ...REPRODUCTION.args })).resolved_version, stableVersion.version_id);
     runtime.lifecycle.closeAdmission();
     assert.equal((await fetch(`${origin}/healthz`)).status, 503);
+    await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
+    const child = await promisify(execFile)(process.execPath, ["--import", "tsx",
+      fileURLToPath(new URL("./verify-demo-persistence.ts", import.meta.url)), JSON.stringify({ graph,
+        call: baseline.call_ref, packet: packetResult.packet_id, digest: packetResult.digest, stable: stableVersion.version_id,
+        evaluation: evaluationId, activation: activation.decision_id, rollback: rollback.decision_id })], {
+      timeout: 35_000,
+      env: { PATH: process.env.PATH, FLYWHEEL_PUBLIC_ORIGIN: origin, FLYWHEEL_OWNER_SECRET: ownerSecret,
+        DEMO_ACCESS_TOKEN: refreshedTokens.access_token, DEMO_DEVELOPMENT_TOKEN: development.tokens.access_token,
+        FALKORDB_URL: process.env.FALKORDB_URL ?? "redis://127.0.0.1:6379",
+        ...(process.env.FALKORDB_USERNAME ? { FALKORDB_USERNAME: process.env.FALKORDB_USERNAME } : {}),
+        ...(process.env.FALKORDB_PASSWORD ? { FALKORDB_PASSWORD: process.env.FALKORDB_PASSWORD } : {}) },
+    });
+    assert.equal(JSON.parse(child.stdout).separate_process_readback, "passed");
+    checks.push("independent child process verifies persisted call, packet, comparison, stable pointer and owner decisions");
+    assert.equal(JSON.parse(child.stdout).production_service_restart, "passed");
+    checks.push("production service process stops and restarts; existing tokens dispatch and read original evidence after both starts");
     checks.push("second independent app", "storage disconnect returns 503; fresh composition reads persisted records and accepts existing token", "draining health returns 503");
     return { recorded_at: new Date().toISOString(), source_commit: sourceCommit, dirty_checkout: dirty,
       evidence_type: "real-local-sdk-and-falkordb", graph, graph_cleanup: "deleted after run", checks,
-      refs: { call: baseline.call_ref, feedback: feedbackResult.feedback_id, packet: packetResult.packet_id },
-      pending: ["fixed public HTTPS", "ChatGPT and Claude consent/calls/refresh", "owner upstream account linking", "real coding CLI isolation and start receipt", "existing-project Vercel verified preview", "real pinned preview comparison", "separately authorized human decisions"] };
+      fixture_notice: "Synthetic read-only data; prewritten corrected reference, not an agent-generated change or hosted preview.",
+      transcript: { input: REPRODUCTION.args, expected: 3, stable: 2, pinned_candidate: 3, stable_after_comparison: 2,
+        after_owner_activation: 3, after_owner_rollback: 2, same_client: true, comparison: ["fail", "pass"] },
+      refs: { call: baseline.call_ref, candidate_call: candidate.call_ref, feedback: feedbackResult.feedback_id, packet: packetResult.packet_id,
+        evaluation: evaluationId, baseline_version: stableVersion.version_id, candidate_version: candidateVersion.version_id,
+        activation: activation.decision_id, rollback: rollback.decision_id },
+      pending: ["fixed public HTTPS", "ChatGPT and Claude consent/calls/refresh", "owner upstream account linking", "real coding CLI isolation and start receipt", "existing-project Vercel verified preview", "real coding-generated candidate and hosted preview comparison", "production owner decisions"] };
   } finally {
     await Promise.allSettled(clients.map((client) => client.close()));
     if (server.listening) await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });

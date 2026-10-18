@@ -1,3 +1,8 @@
+# Start here: local demonstration
+
+For the reproducible, account-free local loop, use [the local demo walkthrough](local-demo.md).
+The operator runbook below covers additional hosted and real-provider milestones.
+
 # Operator runbook (TOO-72, TOO-77)
 
 ## Local evidence and persistent startup

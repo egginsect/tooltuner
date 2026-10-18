@@ -27,6 +27,12 @@ it("composes the production OAuth/gateway/evidence services against real SDK fix
   expect(receipt.refs.call).toMatch(/^call_/);
   expect(receipt.refs.feedback).toMatch(/^fb_/);
   expect(receipt.refs.packet).toMatch(/^pkt_/);
+  expect(receipt.transcript).toMatchObject({ stable: 2, pinned_candidate: 3, stable_after_comparison: 2,
+    after_owner_activation: 3, after_owner_rollback: 2, same_client: true, comparison: ["fail", "pass"] });
+  expect(receipt.checks).toContain("production service process stops and restarts; existing tokens dispatch and read original evidence after both starts");
+  expect(receipt.refs.activation).toMatch(/^dec_/);
+  expect(receipt.refs.rollback).toMatch(/^dec_/);
+  expect(receipt.checks).toContain("independent child process verifies persisted call, packet, comparison, stable pointer and owner decisions");
 }, 60_000);
 
 it("composes MANAGEMENT-only frozen trials without widening direct upstream or evidence access", async () => {

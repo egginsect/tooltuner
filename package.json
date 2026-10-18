@@ -14,7 +14,8 @@
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
     "owner": "tsx src/cli/owner.ts",
-    "demo": "tsx scripts/demo.ts",
+    "demo": "node --import tsx scripts/demo.ts",
+    "demo:local": "bash scripts/demo-local.sh",
     "test:credentials": "vitest run --config vitest.credentials.config.ts"
   },
   "dependencies": {
