@@ -8,23 +8,31 @@ connection exposes exactly three outer tools: `list_apps`, `describe`, and `disp
 Server-side grants separate ordinary use, development evidence access, and management operations.
 This version is agent-facing; no dashboard is required.
 
-## Hackathon demo
+## Actual-feedback demonstration
 
-Submission target: **Agent Memory and Coordination**, for durable evidence and scoped handoffs
-between agent roles. The demonstration uses SDK clients, not an autonomous LLM coding loop.
+A real MCP SDK client called a standalone test MCP through ToolTuner with
+`alpha  beta\ngamma`; its verified public baseline returned **2**. The user had previously
+confirmed the expected count was **3**. This repeated repair explicitly reused that prior
+confirmation, linked it to the new actual call, and froze an evidence packet.
 
-The reproducible local demo uses real MCP SDK transports, the production gateway composition,
-and real FalkorDB with synthetic read-only fixtures. One client observes a faulty word count of
-**2**, a pinned corrected candidate of **3**, and an unchanged default of **2**. Feedback and a
-frozen packet preserve the reproduction. A deterministic comparison reports baseline **fail**
-and candidate **pass**. Separate owner activation changes the same client's default to **3**;
-rollback restores **2**. The run also verifies evidence readback from an independent process
-and production-service restart with existing tokens. The database stays running during that check.
+The assistant retrieved the trace, feedback and exact repository/source pointers through MCP
+before making a fresh correction in the separate test repository. PR #2 triggered a real Vercel
+Preview. After live provider metadata and MCP catalog verification, the owner enrolled it as
+another version of the same `textkit` application. The original client then observed
+**default 2 → pinned preview 3 → default 2**. All four calls, including the initial evidence
+call, have the same persisted client and session, within one retained graph and gateway.
 
-The candidate is **prewritten**, not generated autonomously during the demo. A successful local
-run does not establish hosted ChatGPT/Claude compatibility, a coding-agent job, a hosted preview,
-or production activation. See the [submission guide](docs/hackathon-demo.md) for the complete
-walkthrough, Cypher examples, evidence interpretation, and limitations.
+The gateway MCP URL and client configuration stayed fixed. Candidate selection was explicit:
+`dispatch.version` selected the enrolled preview; omitting it continued to resolve stable.
+Candidate enrollment did not change stable. This is an **assistant-driven SDK workflow**:
+the assistant authored the PR externally. Owner enrollment records the source and parent
+version; the PR/deployment link is external evidence, not a claimed packet-to-candidate edge.
+
+See [the actual-feedback guide](docs/hackathon-demo.md),
+[the sanitized workflow](docs/demo-evidence/actual-feedback-workflow.json), and
+[actual graph lineage](docs/demo-evidence/actual-feedback-graph.json).
+The deterministic `npm run demo:local` uses a prewritten reference candidate and is a separate
+framework smoke test. The captioned video replays actual outputs; it is not a live screen capture.
 
 ## FalkorDB graph model and operations
 

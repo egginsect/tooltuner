@@ -1,0 +1,55 @@
+{
+  "notice": "Sanitized actual get_context results from one retained graph. Semantic labels consistently replace opaque IDs.",
+  "retrievals": [
+    {
+      "at": "2026-10-18T17:02:36.651Z",
+      "operation": "flywheel.get_context",
+      "lineage": [
+        {
+          "from": "original-call",
+          "rel": "RESOLVED",
+          "to": "public-baseline"
+        },
+        {
+          "from": "reused-confirmation",
+          "rel": "ABOUT",
+          "to": "original-call"
+        },
+        {
+          "from": "improvement-packet",
+          "rel": "BASED_ON",
+          "to": "public-baseline"
+        },
+        {
+          "from": "improvement-packet",
+          "rel": "INCLUDES",
+          "to": "original-call"
+        },
+        {
+          "from": "improvement-packet",
+          "rel": "INCLUDES",
+          "to": "reused-confirmation"
+        }
+      ],
+      "completeness": "complete"
+    },
+    {
+      "at": "2026-10-18T17:07:04.859Z",
+      "operation": "flywheel.get_context",
+      "lineage": [
+        {
+          "from": "candidate-call",
+          "rel": "RESOLVED",
+          "to": "candidate-preview"
+        }
+      ],
+      "completeness": "complete"
+    }
+  ],
+  "version_record_readback": {
+    "candidate_parent_version": "public-baseline",
+    "same_repository": true,
+    "distinct_source_commits": true
+  },
+  "external_evidence_boundary": "PR creation and Git-triggered deployment are external workflow evidence. No direct packet-to-candidate graph edge is asserted."
+}
