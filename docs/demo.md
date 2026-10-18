@@ -36,6 +36,49 @@ its URL. Docker's named `falkordb-data` volume retains data across ordinary rest
 `docker compose down -v` for troubleshooting. If a schema marker is incompatible, select a new
 dedicated graph or plan a migration. Preserve failed/unknown records for reconciliation.
 
+## Enroll another isolated local application
+
+The owner CLI can enroll an actual local MCP application without changing the fixture list.
+Use a fresh synthetic application database and a dedicated Flywheel graph. This path supports
+anonymous Streamable HTTP on literal `127.0.0.1` or `[::1]` only; it does not link external
+accounts, import connector tokens, or configure a production upstream.
+
+Create a nonsecret JSON file outside the repository:
+
+```json
+{
+  "application": "local-example",
+  "description": "Isolated application with synthetic data only.",
+  "label": "baseline",
+  "source": { "repo_id": "owner/example", "commit_sha": "<FULL_CHECKOUT_SHA>" },
+  "url": "http://127.0.0.1:8791/mcp",
+  "deployment_id": "local-example-baseline",
+  "parent_version_id": null,
+  "tools": ["read_example"]
+}
+```
+
+```sh
+npm run owner -- application enroll-local --input /path/to/local-app.json --subject local-operator
+```
+
+The command performs actual MCP initialization and paginated catalog discovery, compiles tool
+schemas, and stores an immutable application/version snapshot. It never calls business tools.
+The optional `tools` list enrolls only those exact live capabilities; unknown names are rejected.
+Omit it to validate and enroll the entire catalog. This can isolate a read-only integration from
+unrelated write tools. It does not grant access: per-client grants still apply at dispatch.
+The exact source and deployment identity are owner assertions (`owner_config`), not provider
+attestations. An anonymous local catalog establishes only local readiness, not protected OAuth
+compatibility. Do not reuse a local deployment URL for different running code during a test.
+Re-enrollment of an identical label/content is idempotent; changed source, URL or schema requires
+a new label. An optional parent must be an exact version ID in the same app/repository.
+
+Enrollment never initializes or moves stable. Use the returned exact `version_id` in `describe`
+and `dispatch`; missing stable remains unavailable. Create only the authorized app/tool/repository
+grants described below. A read-only application call still creates Flywheel evidence, so use
+synthetic inputs and outputs. Report truthful feedback, then freeze a packet with the actual
+call/feedback references; a positive result is not a demonstrated defect or repair.
+
 ## Public origin and one-time owner handoff
 
 No fixed public origin, tunnel binary/account, owner consent secret, upstream owner account,
