@@ -1,0 +1,11 @@
+{
+  "applications": [
+    { "application": "textkit", "description": "Technical text fixture with a reproducible baseline whitespace defect.", "path": "/textkit/v1/mcp", "label": "v1" },
+    { "application": "catalog", "description": "Independent deterministic read-only technical capability catalog.", "path": "/catalog/v1/mcp", "label": "v1" }
+  ],
+  "reproduction": {
+    "application": "textkit", "version": "v1", "tool": "word_count", "args": { "text": "alpha  beta\ngamma" },
+    "baseline_result": { "count": 2 }, "expected_result": { "count": 3 }
+  },
+  "corrected_example": { "path": "/textkit/example-v2/mcp", "label": "example-v2", "seed": false }
+}
