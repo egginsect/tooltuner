@@ -15,7 +15,7 @@ import type { OAuthCredential } from "../src/gateway/credentials.js";
 interface StoredToken { client: string; resource: string; scopes: string[]; expires: number }
 export interface ProtectedFixtureFaults {
   publicRuntime?: boolean; ignoreAudience?: boolean; wrongMetadata?: boolean; redirectRuntime?: boolean;
-  wrongIntrospectionAudience?: boolean; missingScope?: boolean; changedSchema?: boolean;
+  omitResourceScopes?: boolean; disableIntrospection?: boolean; wrongIntrospectionAudience?: boolean; missingScope?: boolean; changedSchema?: boolean;
 }
 
 export async function startProtectedFixture() {
@@ -85,10 +85,11 @@ export async function startProtectedFixture() {
   });
   for (const deployment of ["deployment-a", "deployment-b"]) {
     app.get(`/.well-known/oauth-protected-resource/${deployment}/mcp`, (_request, response) => response.json({
-      resource: faults.wrongMetadata ? `${origin}/wrong-resource/mcp` : `${origin}/${deployment}/mcp`, authorization_servers: [issuer], scopes_supported: scopes,
+      resource: faults.wrongMetadata ? `${origin}/wrong-resource/mcp` : `${origin}/${deployment}/mcp`, authorization_servers: [issuer], ...(faults.omitResourceScopes ? {} : { scopes_supported: scopes }),
     }));
   }
   app.post("/introspect", (request, response) => {
+    if (faults.disableIntrospection) { response.status(404).end(); return; }
     const value = access.get(String(request.body?.token));
     if (!value || request.body?.client_id !== value.client) { response.json({ active: false }); return; }
     response.json({ active: value.expires > Date.now() / 1000, aud: faults.wrongIntrospectionAudience ? `${origin}/wrong-audience` : value.resource,

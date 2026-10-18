@@ -22,7 +22,9 @@ import { activateVersion, rollbackVersion, recordMerge } from "./versions.js";
 import { HumanDecision } from "../contracts.js";
 import { beginUpstreamAccountLink, linkUpstreamAccount } from "./link.js";
 import { CredentialStoreConfiguration, createConfiguredCredentialStore } from "../runtime.js";
-import { enrollLocalApplication } from "./enroll.js";
+import { beginDeviceAccountLink } from "./device-link.js";
+import { createCredentialMediator } from "../gateway/credentials.js";
+import { enrollRemoteApplication, enrollLocalApplication } from "./enroll.js";
 
 type Command = (db: GraphClient, ownerId: string, argv: string[]) => Promise<unknown>;
 
@@ -110,8 +112,8 @@ function ownerDecision(kind: "merge" | "activate" | "rollback"): Command {
 
 const accountLink: Command = async (db, ownerId, argv) => {
   const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" }, mode: { type: "string", default: "browser" } } });
-  if (!values.input || !values.subject || !["browser", "existing"].includes(values.mode!)) {
-    throw new Error("account link needs --input <nonsecret-link.json> --subject <owner identity> and --mode browser|existing");
+  if (!values.input || !values.subject || !["browser", "device", "existing"].includes(values.mode!)) {
+    throw new Error("account link needs --input <nonsecret-link.json> --subject <owner identity> and --mode browser|device|existing");
   }
   const schema = z.object({
     credentialStore: CredentialStoreConfiguration,
@@ -123,7 +125,9 @@ const accountLink: Command = async (db, ownerId, argv) => {
   const options = { db, owner: { owner_id: ownerId, subject: values.subject }, store: createConfiguredCredentialStore(input.credentialStore, process.env),
     account: input.account, target: input.target };
   try {
-    const result = values.mode === "existing" ? await linkUpstreamAccount(options) : await beginUpstreamAccountLink({ ...options,
+    const result = values.mode === "existing" ? await linkUpstreamAccount(options) : values.mode === "device" ? await beginDeviceAccountLink({ ...options,
+      onUserCode: (code) => { process.stderr.write(`Open ${code.verification_uri_complete ?? code.verification_uri} and confirm user code ${code.user_code}. Expires in ${code.expires_in} seconds.\n`); },
+    }) : await beginUpstreamAccountLink({ ...options,
       onAuthorizationUrl: (url) => { process.stderr.write(`Open this owner authorization URL in your local browser: ${url.href}\n`); },
     });
     return { linked: true, auth_config_ref: result.account.auth_config_ref, application: result.account.application,
@@ -139,6 +143,14 @@ export const COMMANDS: Record<string, Command> = {
     if (configuration.kind !== "postgres") throw new Error("credential initialize requires a PostgreSQL credential store configuration");
     const store = createPostgresCredentialStore({ ...configuration, ...credentialPostgresSecrets(process.env) });
     try { await store.initialize(); return { initialized: true }; } finally { await store.close(); }
+  },
+  "application enroll-remote": async (db, ownerId, argv) => {
+    const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" } } });
+    if (!values.input || !values.subject) throw new Error("application enroll-remote needs --input <nonsecret-remote-app.json> --subject <owner identity>");
+    const input = z.object({ credentialStore: CredentialStoreConfiguration, application: z.unknown() }).strict().parse(JSON.parse(await readFile(values.input, "utf8")));
+    const store = createConfiguredCredentialStore(input.credentialStore, process.env);
+    try { return await enrollRemoteApplication(db, { owner_id: ownerId, subject: values.subject }, input.application, { credentials: createCredentialMediator({ db, store }) }); }
+    finally { await store.close?.(); }
   },
   "application enroll-local": async (db, ownerId, argv) => {
     const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" } } });

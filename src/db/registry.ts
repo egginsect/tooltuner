@@ -219,7 +219,8 @@ export const UpstreamAccount = z.object({
   schema_version: z.literal(1), owner_id: z.string().min(1), created_at: z.string().datetime({ offset: true }),
   auth_config_ref: SafeReference, credential_ref: SafeReference, application: Application.shape.application,
   repo_id: z.string().min(1), environment: z.enum(["local", "preview", "production"]),
-  issuer: z.string().url(), introspection_url: z.string().url(), client_id: z.string().min(1).max(200), scopes: Scopes,
+  issuer: z.string().url(), introspection_url: z.string().url().optional(),
+  validation_mode: z.enum(["introspection", "standard_oauth"]).optional(), client_id: z.string().min(1).max(200), scopes: Scopes,
 }).strict();
 export type UpstreamAccount = z.infer<typeof UpstreamAccount>;
 

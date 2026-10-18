@@ -87,6 +87,7 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
       locked = true;
       let version: number | undefined;
       const scoped: CredentialStore = {
+        custody: "encrypted_postgres",
         async get(ref, input = target) {
           if (ref !== reference || identity(ref, input) !== binding) throw unavailable();
           const result = await client!.query<EnvelopeRow>("SELECT * FROM flywheel_upstream_credentials WHERE reference=$1", [ref]);
@@ -126,6 +127,7 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
     }
   }
   return {
+    custody: "encrypted_postgres",
     exclusive,
     async get(reference, binding) { identity(reference, binding); return exclusive(reference, binding!, (store) => store.get(reference, binding)); },
     async put(reference, value, binding) { identity(reference, binding); return exclusive(reference, binding!, (store) => store.put!(reference, value, binding)); },

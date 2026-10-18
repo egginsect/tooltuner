@@ -85,3 +85,5 @@ pending owner approval. The repository remains private; publication and contest 
 not authorized by this preparation.
 
 Optional upstream OAuth custody: [PostgreSQL encryption, exact-target bindings and refresh recovery](docs/postgres-credentials.md).
+
+For protected MCP servers without token introspection, see [standard OAuth owner linking](docs/standard-oauth.md) for explicit PKCE/device acquisition, encrypted custody and selected-tool remote enrollment.

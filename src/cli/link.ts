@@ -10,7 +10,7 @@ import {
 } from "../db/registry.js";
 import type { GraphClient } from "../db/client.js";
 import {
-  OAuthCredential, authorizeCredential, credentialFetch, discoverAccountIssuer, secureUrl, type CredentialStore,
+  OAuthCredential, acquisitionProvenance, validateStandardTokens, authorizeCredential, credentialFetch, discoverAccountIssuer, secureUrl, type CredentialStore,
 } from "../gateway/credentials.js";
 import { readUpstreamCatalog } from "../gateway/upstream.js";
 import type { OwnerDecisionContext } from "./versions.js";
@@ -24,7 +24,7 @@ export interface LinkOptions {
   client_ref?: string;
 }
 
-function configured(options: LinkOptions, clientId: string) {
+export function configured(options: LinkOptions, clientId: string) {
   if (!options.owner.owner_id || !options.owner.subject) throw new FlywheelError("forbidden", "Upstream linking requires the trusted local owner context.");
   const created_at = new Date().toISOString();
   const account = UpstreamAccount.parse({ ...options.account, client_id: clientId, schema_version: 1, owner_id: options.owner.owner_id, created_at });
@@ -34,17 +34,11 @@ function configured(options: LinkOptions, clientId: string) {
   return { account, binding };
 }
 
-async function finishLink(options: LinkOptions, clientId: string) {
+export async function finishLink(options: LinkOptions, clientId: string) {
   const { account, binding } = configured(options, clientId);
   const prior = await getUpstreamAccount(options.db, account.owner_id, account.auth_config_ref);
   if (prior && canonicalDigest(prior, ["created_at"]) !== canonicalDigest(account, ["created_at"])) throw new FlywheelError("ingest_conflict", "This logical account reference is already linked to a different authority.");
-  const metadata = await discoverOAuthProtectedResourceMetadata(binding.url, {}, async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : input.toString());
-    if (secureUrl(url.href, binding.environment).origin !== new URL(binding.url).origin) throw new FlywheelError("forbidden", "Resource discovery escaped the explicitly configured upstream origin.");
-    return fetch(input, { ...init, redirect: "error", signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
-  });
-  if (metadata.resource !== binding.resource || metadata.authorization_servers?.length !== 1 || metadata.authorization_servers[0] !== account.issuer ||
-      account.scopes.some((scope) => !metadata.scopes_supported?.includes(scope))) throw new FlywheelError("forbidden", "Configured upstream resource metadata does not match the intended OAuth issuer/resource/scopes.");
+  await verifyResourceMetadata(account, binding, options.timeoutMs);
   const headers = await authorizeCredential(account, binding, options.store, options.timeoutMs ?? 10_000);
   const tools = await readUpstreamCatalog({ owner_id: binding.owner_id, application: binding.application, source: { repo_id: binding.repo_id, commit_sha: binding.commit_sha },
     version_id: `ver_${canonicalDigest({ deployment: binding.deployment_id }).slice(7, 33)}`, runtime_target: { kind: "mcp_streamable_http", url: binding.url,
@@ -55,8 +49,25 @@ async function finishLink(options: LinkOptions, clientId: string) {
   return { account: saved, binding, schema_digest: canonicalDigest({ tools }) };
 }
 
+export async function verifyResourceMetadata(account: UpstreamAccount, binding: CredentialBinding, timeoutMs = 10_000) {
+  if (account.validation_mode === "standard_oauth" && (binding.url !== binding.resource || binding.audience !== binding.resource)) throw new FlywheelError("forbidden", "Standard OAuth requires the exact MCP URL as resource and audience.");
+  try {
+    const metadata = await discoverOAuthProtectedResourceMetadata(binding.url, {}, async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (secureUrl(url.href, binding.environment).origin !== new URL(binding.url).origin) throw new FlywheelError("forbidden", "Resource discovery escaped the explicitly configured upstream origin.");
+      return fetch(input, { ...init, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
+    });
+    if (metadata.resource !== binding.resource || metadata.authorization_servers?.length !== 1 || metadata.authorization_servers[0] !== account.issuer ||
+        ((account.validation_mode !== "standard_oauth" || metadata.scopes_supported !== undefined) && account.scopes.some((scope) => !metadata.scopes_supported?.includes(scope)))) throw new FlywheelError("forbidden", "Configured upstream resource metadata does not match the intended OAuth issuer/resource/scopes.");
+  } catch (error) {
+    if (error instanceof FlywheelError) throw error;
+    throw new FlywheelError("operation_unavailable", "Protected resource discovery could not verify the configured authority.");
+  }
+}
+
 /** Owner configured an environment/helper/PostgreSQL reference containing an SDK OAuth credential document. */
 export async function linkUpstreamAccount(options: LinkOptions) {
+  if (options.account.validation_mode === "standard_oauth") throw new FlywheelError("forbidden", "Standard OAuth cannot import tokens; start a fresh owner authorization flow.");
   let secret: OAuthCredential;
   try { secret = OAuthCredential.parse(await options.store.get(options.account.credential_ref, configured(options, options.account.client_id ?? "pending-client").binding)); }
   catch { throw new FlywheelError("operation_unavailable", "Configure a valid external OAuth credential reference before linking the account."); }
@@ -73,6 +84,8 @@ export async function beginUpstreamAccountLink(options: LinkOptions & {
 }): Promise<Awaited<ReturnType<typeof linkUpstreamAccount>>> {
   if (!options.store.put || !/^(helper|postgres):/.test(options.account.credential_ref)) throw new FlywheelError("operation_unavailable", "Browser linking requires a writable helper or PostgreSQL credential reference.");
   const initial = configured(options, options.account.client_id ?? "pending-dynamic-registration");
+  if (initial.account.validation_mode === "standard_oauth" && (options.store.custody !== "encrypted_postgres" || !options.account.credential_ref.startsWith("postgres:"))) throw new FlywheelError("forbidden", "Standard OAuth acquisition requires encrypted PostgreSQL custody.");
+  await verifyResourceMetadata(initial.account, initial.binding, Math.min(options.timeoutMs ?? 10_000, 30_000));
   const prior = await getUpstreamAccount(options.db, initial.account.owner_id, initial.account.auth_config_ref);
   if (prior && canonicalDigest(prior, ["created_at"]) !== canonicalDigest(initial.account, ["created_at"])) throw new FlywheelError("ingest_conflict", "This account reference is already linked; reuse its configured client and external credential authority.");
   const timeoutMs = options.timeoutMs ?? 120_000;
@@ -122,6 +135,7 @@ export async function beginUpstreamAccountLink(options: LinkOptions & {
         grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" }, scope: options.account.scopes.join(" "),
       fetchFn: credentialFetch(issuerConfig, Math.min(timeoutMs, 30_000)) });
     }
+    if (client.issuer !== undefined && client.issuer !== options.account.issuer) throw new FlywheelError("forbidden", "Registered client belongs to a different issuer.");
     const { authorizationUrl, codeVerifier } = await startAuthorization(options.account.issuer, { metadata, clientInformation: client, redirectUrl: redirectUri,
       scope: options.account.scopes.join(" "), state, resource: options.target.resource });
     if (authorizationUrl.origin !== new URL(options.account.issuer).origin) throw new FlywheelError("forbidden", "Owner consent escaped the configured issuer.");
@@ -129,9 +143,12 @@ export async function beginUpstreamAccountLink(options: LinkOptions & {
     const authorizationCode = await codePromise;
     const tokens = await exchangeAuthorization(options.account.issuer, { metadata, clientInformation: client, authorizationCode, codeVerifier,
       redirectUri, resource: options.target.resource, fetchFn: credentialFetch(issuerConfig, Math.min(timeoutMs, 30_000)) });
-    const secret = OAuthCredential.parse({ issuer: options.account.issuer, environment: options.account.environment, resource: options.target.resource,
+    if (tokens.issuer !== undefined && tokens.issuer !== options.account.issuer) throw new FlywheelError("forbidden", "Token response issuer does not match the configured authority.");
+    const linked = configured(options, client.client_id);
+    const secret = OAuthCredential.parse({ ...(linked.account.validation_mode === "standard_oauth" ? { acquisition: acquisitionProvenance(linked.account, linked.binding) } : {}), issuer: options.account.issuer, environment: options.account.environment, resource: options.target.resource,
       audience: options.target.audience, obtained_at: Math.floor(Date.now() / 1000), client: { ...client, issuer: options.account.issuer }, tokens: { ...tokens, issuer: options.account.issuer } });
-    const account = configured(options, client.client_id).account;
+    if (linked.account.validation_mode === "standard_oauth") validateStandardTokens(linked.account, linked.binding, secret);
+    const account = linked.account;
     const existing = await getUpstreamAccount(options.db, account.owner_id, account.auth_config_ref);
     if (existing && canonicalDigest(existing, ["created_at"]) !== canonicalDigest(account, ["created_at"])) throw new FlywheelError("ingest_conflict", "The account reference changed during authorization; the credential helper was not overwritten.");
     await options.store.put(options.account.credential_ref, secret, configured(options, client.client_id).binding);
