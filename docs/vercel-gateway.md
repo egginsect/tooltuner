@@ -37,6 +37,8 @@ Keep the repository root as the project root. `vercel.json` declares Framework P
 catch-all rewrite and the explicit `public` static output directory. That directory contains
 only a robots exclusion file; repository sources must never be configured as static output.
 No project ID, team ID, account name or deployment-specific hostname is committed.
+The explicit project-relative `typeRoots` keeps Node type resolution stable when the
+Vercel TypeScript compiler creates an extending configuration in a temporary directory.
 
 `.vercelignore` excludes local secrets, deployment metadata, runtime state, tests and docs
 from CLI source uploads. This is defense in depth, not permission to keep secrets in tracked
