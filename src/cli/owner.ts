@@ -8,6 +8,7 @@
  *   npm run owner -- grant list
  *   npm run owner -- grant revoke grant_...
  */
+import { enrollPublicPreview, vercelCliReader } from "./public-preview.js";
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
@@ -143,6 +144,16 @@ export const COMMANDS: Record<string, Command> = {
     if (configuration.kind !== "postgres") throw new Error("credential initialize requires a PostgreSQL credential store configuration");
     const store = createPostgresCredentialStore({ ...configuration, ...credentialPostgresSecrets(process.env) });
     try { await store.initialize(); return { initialized: true }; } finally { await store.close(); }
+  },
+  "application enroll-public-preview": async (db, ownerId, argv) => {
+    const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" },
+      "vercel-cli": { type: "string" }, "vercel-data": { type: "string" }, "vercel-cache": { type: "string" } } });
+    if (!values.input || !values.subject || !values["vercel-cli"] || !values["vercel-data"] || !values["vercel-cache"]) {
+      throw new Error("application enroll-public-preview needs --input <nonsecret-preview.json> --subject <owner identity> --vercel-cli <absolute executable> --vercel-data <existing CLI data directory> --vercel-cache <cache directory>");
+    }
+    const provider = vercelCliReader({ executable: values["vercel-cli"], dataDirectory: values["vercel-data"],
+      cacheDirectory: values["vercel-cache"], executablePath: process.env.PATH ?? "/usr/bin:/bin" });
+    return enrollPublicPreview(db, { owner_id: ownerId, subject: values.subject }, JSON.parse(await readFile(values.input, "utf8")), provider);
   },
   "application enroll-remote": async (db, ownerId, argv) => {
     const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" } } });

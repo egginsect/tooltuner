@@ -100,7 +100,7 @@ export async function enrollRemoteApplication(
 }
 
 /** Shared immutable registration path; never changes STABLE, grants, accounts or bindings. */
-async function enrollApplication(
+export async function enrollApplication(
   db: GraphClient, owner: OwnerDecisionContext, input: z.infer<typeof LocalEnrollment>,
   target: Omit<UpstreamTarget, "version_id">, options: UpstreamOptions = {},
 ) {
@@ -110,7 +110,7 @@ async function enrollApplication(
   }
   if (input.parent_version_id) {
     const parent = await getVersion(db, owner.owner_id, input.application, input.parent_version_id);
-    if (!parent || parent.version_id !== input.parent_version_id || parent.source.repo_id !== input.source.repo_id) {
+    if (!parent || parent.owner_id !== owner.owner_id || parent.application !== input.application || parent.version_id !== input.parent_version_id || parent.source.repo_id !== input.source.repo_id) {
       throw new FlywheelError("version_unavailable", "The exact parent must exist in this owner application and source repository.");
     }
   }
@@ -137,7 +137,7 @@ async function enrollApplication(
     // Source/deployment identity is an explicit owner assertion, not a provider attestation.
     verified_provenance: { method: "owner_config" as const, job_id: null, packet_id: null },
     state: "ready" as const,
-    readiness: { deployment_ready: true, provenance_verified: true, schema_verified: true, auth_verified: true } };
+    readiness: { deployment_ready: true, provenance_verified: true, schema_verified: true, auth_verified: target.public_access === undefined } };
   const version = Version.parse({ ...content, digest: versionDigest(content) });
   const prior = await getVersion(db, owner.owner_id, input.application, input.label);
   if (prior && (prior.version_id !== version_id || prior.digest !== version.digest)) {

@@ -334,6 +334,14 @@ export const RuntimeTarget = z.object({
 export const VersionState = z.enum(["pending_checks", "ready", "failed", "unavailable"]);
 export const READINESS_CHECKS = ["deployment_ready", "provenance_verified", "schema_verified", "auth_verified"] as const;
 
+/** Explicit anonymous access, verified only for a provider-inspected immutable preview. */
+export const PublicPreviewAccess = z.object({
+  mode: z.literal("public"), provider: z.literal("vercel"),
+  network_policy: z.enum(["public_ipv4_pinned", "provider_verified_vercel"]),
+  project_id: z.string().min(1), team_id: z.string().min(1),
+  source_verification: z.enum(["provider_git", "owner_metadata"]),
+}).strict();
+
 export const Version = z.object({
   ...recordBase,
   version_id: VersionId,
@@ -349,6 +357,8 @@ export const Version = z.object({
   runtime_target: RuntimeTarget,
   /** Name of a server-side credential reference; never the secret itself. */
   auth_config_ref: z.string().nullable(),
+  /** Absent on legacy/protected versions; included in the immutable digest when present. */
+  public_access: PublicPreviewAccess.optional(),
   verified_provenance: z.object({
     method: z.enum(["owner_config", "manager_verified"]),
     job_id: JobId.nullable(),

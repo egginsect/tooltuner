@@ -34,8 +34,9 @@ export async function registryStorage<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-export function versionDigest(version: Pick<VersionRecord, (typeof VERSION_DIGEST_FIELDS)[number]>): string {
-  return canonicalDigest(Object.fromEntries(VERSION_DIGEST_FIELDS.map((key) => [key, version[key]])));
+export function versionDigest(version: Pick<VersionRecord, (typeof VERSION_DIGEST_FIELDS)[number]> & Pick<VersionRecord, "public_access">): string {
+  return canonicalDigest({ ...Object.fromEntries(VERSION_DIGEST_FIELDS.map((key) => [key, version[key]])),
+    ...(version.public_access ? { public_access: version.public_access } : {}) });
 }
 
 export function validateVersion(input: VersionRecord): VersionRecord {
@@ -49,9 +50,24 @@ export function validateVersion(input: VersionRecord): VersionRecord {
   return version;
 }
 
+/** Public preview policy is explicit and digest-bound; it never claims OAuth authentication. */
+export function isVersionReady(version: VersionRecord): boolean {
+  if (version.state !== "ready") return false;
+  if (!version.public_access) return READINESS_CHECKS.every((key) => version.readiness[key]);
+  const url = new URL(version.runtime_target.url);
+  return version.public_access.mode === "public" && version.public_access.provider === "vercel"
+    && ["public_ipv4_pinned", "provider_verified_vercel"].includes(version.public_access.network_policy)
+    && version.auth_config_ref === null && version.runtime_target.environment === "preview"
+    && Boolean(version.runtime_target.deployment_id) && /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app\//.test(url.href)
+    && !url.username && !url.password && !url.search && !url.hash && !url.port
+    && version.verified_provenance.method === "owner_config" && version.verified_provenance.job_id === null
+    && version.verified_provenance.packet_id === null && version.readiness.auth_verified === false
+    && version.readiness.deployment_ready && version.readiness.provenance_verified && version.readiness.schema_verified;
+}
+
 export function assertVersionReady(version: VersionRecord): void {
-  if (version.state !== "ready" || READINESS_CHECKS.some((key) => !version.readiness[key])) {
-    throw new FlywheelError("version_unavailable", "The selected version has not passed all readiness checks.", { fieldPath: "version" });
+  if (!isVersionReady(version)) {
+    throw new FlywheelError("version_unavailable", "The selected version has not passed its explicit access-policy readiness checks.", { fieldPath: "version" });
   }
 }
 

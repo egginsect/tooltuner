@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isVersionReady } from "../db/registry.js";
 import {
   Evaluation, Recommendation, FlywheelError, RunExperimentInput, GetExperimentInput, RecommendCandidateInput,
   canonicalDigest, canonicalJson, newId, provenanceOf, COMPLETE, Version as VersionSchema,
@@ -105,7 +106,7 @@ export function createExperimentService(options: ExperimentServiceOptions): Expe
       const missing: string[] = [];
       for (const id of input.version_ids) {
         const version = await options.getVersion(ctx.principal.owner_id, input.application, id);
-        if (!version || version.owner_id !== ctx.principal.owner_id || version.application !== input.application || version.version_id !== id || version.state !== "ready" || Object.values(version.readiness).some((r) => !r)) {
+        if (!version || version.owner_id !== ctx.principal.owner_id || version.application !== input.application || version.version_id !== id || !isVersionReady(version)) {
           versions.push(null); missing.push(`version:${id}:UNVERIFIED`);
         } else versions.push(structuredClone(version));
       }
@@ -268,7 +269,7 @@ export function createTrustedExperimentReplay(options: TrustedExperimentReplayOp
     assertRepoAllowed(ctx.grant, frozen.input.repoId);
     assertTrialScope(ctx, pin, request.tool);
     const current = await options.getVersion(evaluation.owner_id, evaluation.application, pin.version_id);
-    if (!current || canonicalDigest(current) !== canonicalDigest(pin) || current.state !== "ready" || Object.values(current.readiness).some((ready) => !ready)) {
+    if (!current || canonicalDigest(current) !== canonicalDigest(pin) || !isVersionReady(current)) {
       throw new FlywheelError("version_unavailable", "The immutable comparison version identity or verified readiness changed; no fallback is allowed.");
     }
     const key = canonicalJson([ctx.principal.owner_id, ctx.grant.grant_id, request.idempotency_key]);
