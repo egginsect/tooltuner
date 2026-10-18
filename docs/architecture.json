@@ -1,0 +1,342 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Tooltuner: implemented architecture",
+    "output": "docs/architecture.html",
+    "locale": "en",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "MCP clients",
+      "sublabel": "One logical /mcp endpoint",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        175,
+        70
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "OAuth + consent",
+      "sublabel": "Owner login / scoped grants",
+      "pos": [
+        350,
+        40
+      ],
+      "size": [
+        185,
+        70
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "MCP gateway",
+      "sublabel": "list_apps / describe / dispatch",
+      "pos": [
+        660,
+        40
+      ],
+      "size": [
+        200,
+        70
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "backend",
+      "label": "Registry + dispatch",
+      "sublabel": "Stable or exact version pin",
+      "pos": [
+        660,
+        230
+      ],
+      "size": [
+        200,
+        70
+      ]
+    },
+    {
+      "id": "upstream",
+      "type": "external",
+      "label": "Upstream MCP apps",
+      "sublabel": "Streamable HTTP",
+      "pos": [
+        1010,
+        230
+      ],
+      "size": [
+        180,
+        70
+      ]
+    },
+    {
+      "id": "custody",
+      "type": "security",
+      "label": "Credential mediator",
+      "sublabel": "Exact-target authorization",
+      "pos": [
+        1010,
+        430
+      ],
+      "size": [
+        180,
+        70
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL (optional)",
+      "sublabel": "AES-256-GCM token custody",
+      "pos": [
+        1010,
+        630
+      ],
+      "size": [
+        180,
+        70
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "backend",
+      "label": "Evidence + feedback",
+      "sublabel": "Traces / frozen packets",
+      "pos": [
+        350,
+        230
+      ],
+      "size": [
+        185,
+        70
+      ]
+    },
+    {
+      "id": "graph",
+      "type": "database",
+      "label": "FalkorDB",
+      "sublabel": "Auth / registry / lineage",
+      "pos": [
+        350,
+        430
+      ],
+      "size": [
+        185,
+        70
+      ]
+    },
+    {
+      "id": "owner",
+      "type": "external",
+      "label": "Owner CLI",
+      "sublabel": "Enroll / link / decide",
+      "pos": [
+        40,
+        430
+      ],
+      "size": [
+        175,
+        70
+      ]
+    },
+    {
+      "id": "jobs",
+      "type": "backend",
+      "label": "Local jobs + experiments",
+      "sublabel": "Configured adapters only",
+      "pos": [
+        350,
+        630
+      ],
+      "size": [
+        185,
+        70
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "Sandboxed coding CLI",
+      "sublabel": "Allowlisted environment",
+      "pos": [
+        40,
+        630
+      ],
+      "size": [
+        175,
+        70
+      ]
+    },
+    {
+      "id": "preview",
+      "type": "cloud",
+      "label": "Preview manager",
+      "sublabel": "Configured preview only",
+      "pos": [
+        660,
+        630
+      ],
+      "size": [
+        200,
+        70
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "edge-1",
+      "from": "client",
+      "to": "auth",
+      "label": "Authorize",
+      "variant": "security"
+    },
+    {
+      "id": "edge-2",
+      "from": "auth",
+      "to": "gateway",
+      "label": "Scoped access",
+      "variant": "security"
+    },
+    {
+      "id": "edge-3",
+      "from": "gateway",
+      "to": "registry",
+      "label": "Validate + resolve",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge-4",
+      "from": "registry",
+      "to": "upstream",
+      "label": "Invoke pinned tool",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge-5",
+      "from": "registry",
+      "to": "evidence",
+      "label": "Admit + complete",
+      "variant": "default"
+    },
+    {
+      "id": "edge-6",
+      "from": "evidence",
+      "to": "graph",
+      "label": "Persist",
+      "variant": "default"
+    },
+    {
+      "id": "edge-7",
+      "from": "owner",
+      "to": "graph",
+      "label": "Owner decisions",
+      "variant": "security"
+    },
+    {
+      "id": "edge-8",
+      "from": "registry",
+      "to": "custody",
+      "label": "Resolve auth",
+      "variant": "security"
+    },
+    {
+      "id": "edge-9",
+      "from": "custody",
+      "to": "postgres",
+      "label": "Read / refresh",
+      "variant": "security"
+    },
+    {
+      "id": "edge-10",
+      "from": "jobs",
+      "to": "graph",
+      "label": "Jobs + comparisons",
+      "variant": "default"
+    },
+    {
+      "id": "edge-11",
+      "from": "jobs",
+      "to": "runner",
+      "label": "Configured job",
+      "variant": "default"
+    },
+    {
+      "id": "edge-12",
+      "from": "jobs",
+      "to": "preview",
+      "label": "Configured preview",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Request path",
+      "items": [
+        "Clients authorize with the gateway OAuth server and owner consent.",
+        "Grant checks apply to discovery and dispatch. Dispatch resolves an immutable version, durably admits the call, then invokes the selected upstream tool.",
+        "Incomplete durable completion is reported as unknown, never assumed successful."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Persistence and custody",
+      "items": [
+        "FalkorDB stores authorization, registry, evidence, feedback, packet, job and experiment state.",
+        "Optional PostgreSQL stores encrypted upstream OAuth credentials; keys remain outside the database.",
+        "Credential mediation binds use to the intended upstream target.",
+        "Transaction-pooler refresh support is implemented and tested in the review PR stack, not merged main: durable versioned claims and compare-and-swap writes; unknown outcomes remain fenced. Live rollout is separate."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Runtime boundary",
+      "items": [
+        "Hosted mode serves requests only: it disables local coding jobs, experiments, deployment managers and fixture seeding.",
+        "Local runner and preview/experiment paths require explicit trusted configuration. They are implementation capabilities, not verified live deployment claims.",
+        "The coding subprocess receives an allowlisted environment, not owner, database or deployment credentials."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Owner decisions and scope",
+      "items": [
+        "Only the owner CLI records merge decisions and changes stable activation or rollback. Recommendations do not activate versions.",
+        "Current owner authentication uses the gateway owner-secret flow. Supabase Auth is planned and is not shown as implemented.",
+        "This sanitized overview omits private endpoints, identifiers, commit hashes and source hyperlinks."
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Gateway request runtime",
+      "wraps": [
+        "auth",
+        "gateway",
+        "registry",
+        "evidence"
+      ],
+      "pad": 22
+    },
+    {
+      "kind": "security-group",
+      "label": "Trusted local worker host (optional; disabled in hosted mode)",
+      "wraps": [
+        "runner",
+        "jobs",
+        "preview"
+      ],
+      "pad": 22
+    }
+  ]
+}
