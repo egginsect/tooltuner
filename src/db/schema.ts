@@ -1,3 +1,4 @@
+import { AUTH_INDEX_SPECS } from "./auth.js";
 import { StorageError } from "../errors.js";
 import type { GraphClient } from "./client.js";
 
@@ -19,7 +20,7 @@ const META_SPEC: IndexSpec = { label: "Meta", property: "id", unique: true };
  * repository functions they add (for example `{ label: "Call", property: "id", unique: true }`);
  * the server passes this list to `bootstrapSchema` at startup.
  */
-export const INDEX_SPECS: readonly IndexSpec[] = [];
+export const INDEX_SPECS: readonly IndexSpec[] = [...AUTH_INDEX_SPECS];
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

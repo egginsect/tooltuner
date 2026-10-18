@@ -8,17 +8,12 @@ import { z } from "zod";
 const emptyToUndefined = (value: unknown): unknown => (typeof value === "string" && value.trim() === "" ? undefined : value);
 const optional = <T extends z.ZodType>(schema: T) => z.preprocess(emptyToUndefined, schema.optional());
 
-const commaList = z.preprocess(
-  (value) => (typeof value === "string" ? value.split(",").map((item) => item.trim()).filter((item) => item !== "") : value),
-  z.array(z.url()),
-);
-
 /** Public origin: scheme + host (+ port) only. HTTPS is required except for localhost development. */
 const originSchema = z.url().superRefine((value, ctx) => {
   const url = new URL(value);
   if (url.origin !== value) ctx.addIssue({ code: "custom", message: `Must be an origin without path or trailing slash, for example ${url.origin}` });
   const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !isLocal) ctx.addIssue({ code: "custom", message: "Must use https unless the host is localhost" });
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocal)) ctx.addIssue({ code: "custom", message: "Must use https unless the host is localhost" });
 });
 
 const EnvSchema = z.object({
@@ -31,8 +26,8 @@ const EnvSchema = z.object({
   FLYWHEEL_PUBLIC_ORIGIN: optional(originSchema),
   OAUTH_ISSUER: optional(z.url()),
   OAUTH_RESOURCE: optional(z.url()),
-  OAUTH_ALLOWED_REDIRECT_URIS: z.preprocess(emptyToUndefined, commaList.optional()),
-  OAUTH_SIGNING_KEY_REF: optional(z.string()),
+  FLYWHEEL_OWNER_ID: z.preprocess(emptyToUndefined, z.string().regex(/^[a-z][a-z0-9-]{0,62}$/).default("owner")),
+  FLYWHEEL_OWNER_SECRET: optional(z.string().min(16, "Use at least 16 characters")),
   FIXTURE_REGISTRY_PATH: optional(z.string()),
   RUNNER_CONFIG_PATH: optional(z.string()),
   VERCEL_PROJECT_ID: optional(z.string()),
@@ -46,12 +41,11 @@ export interface Config {
   database: { url: string; graph: string; username: string | undefined; password: string | undefined };
   /** Fixed public HTTPS origin served by the tunnel; undefined until configured. */
   publicOrigin: string | undefined;
+  owner: { id: string; secret: string | undefined };
   oauth: {
     issuer: string | undefined;
     /** Protected resource URL; defaults to `<publicOrigin>/mcp` when only the origin is set. */
     resource: string | undefined;
-    allowedRedirectUris: string[];
-    signingKeyRef: string | undefined;
   };
   registry: { fixtureRegistryPath: string | undefined };
   runner: { configPath: string | undefined };
@@ -79,11 +73,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const publicOrigin = values.FLYWHEEL_PUBLIC_ORIGIN;
   const resource = values.OAUTH_RESOURCE ?? (publicOrigin === undefined ? undefined : `${publicOrigin}/mcp`);
-  if (publicOrigin !== undefined && resource !== undefined && new URL(resource).origin !== publicOrigin) {
-    problems.push(`OAUTH_RESOURCE: origin ${new URL(resource).origin} must equal FLYWHEEL_PUBLIC_ORIGIN (${publicOrigin}); the resource must live on the fixed public origin`);
+  if (values.OAUTH_RESOURCE !== undefined && publicOrigin === undefined) {
+    problems.push("OAUTH_RESOURCE: set FLYWHEEL_PUBLIC_ORIGIN so the resource endpoint can be checked");
   }
-  if (values.OAUTH_ISSUER !== undefined && publicOrigin === undefined) {
-    problems.push("OAUTH_ISSUER: set FLYWHEEL_PUBLIC_ORIGIN as well so issuer, resource and redirect routes can be checked for consistency");
+  if (publicOrigin !== undefined && resource !== `${publicOrigin}/mcp`) {
+    problems.push("OAUTH_RESOURCE: must equal FLYWHEEL_PUBLIC_ORIGIN followed by /mcp");
+  }
+  const issuer = publicOrigin === undefined ? undefined : new URL(publicOrigin).href;
+  if (values.OAUTH_ISSUER !== undefined && (issuer === undefined || new URL(values.OAUTH_ISSUER).href !== issuer)) {
+    problems.push("OAUTH_ISSUER: must equal FLYWHEEL_PUBLIC_ORIGIN; the built-in authorization server uses that origin");
   }
   if (problems.length > 0) throw new ConfigError(problems);
 
@@ -91,11 +89,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     http: { host: values.HOST, port: values.PORT },
     database: { url: values.FALKORDB_URL, graph: values.FALKORDB_GRAPH, username: values.FALKORDB_USERNAME, password: values.FALKORDB_PASSWORD },
     publicOrigin,
+    owner: { id: values.FLYWHEEL_OWNER_ID, secret: values.FLYWHEEL_OWNER_SECRET },
     oauth: {
-      issuer: values.OAUTH_ISSUER,
+      issuer,
       resource,
-      allowedRedirectUris: values.OAUTH_ALLOWED_REDIRECT_URIS ?? [],
-      signingKeyRef: values.OAUTH_SIGNING_KEY_REF,
     },
     registry: { fixtureRegistryPath: values.FIXTURE_REGISTRY_PATH },
     runner: { configPath: values.RUNNER_CONFIG_PATH },
@@ -115,11 +112,10 @@ export function describeConfig(config: Config): Record<string, unknown> {
       password: config.database.password === undefined ? "unset" : "set",
     },
     publicOrigin: config.publicOrigin ?? "unset",
+    owner: { id: config.owner.id, secret: config.owner.secret === undefined ? "unset" : "set" },
     oauth: {
       issuer: config.oauth.issuer ?? "unset",
       resource: config.oauth.resource ?? "unset",
-      allowedRedirectUris: config.oauth.allowedRedirectUris.length,
-      signingKeyRef: config.oauth.signingKeyRef === undefined ? "unset" : "set",
     },
     registry: { fixtureRegistryPath: config.registry.fixtureRegistryPath ?? "unset" },
     runner: { configPath: config.runner.configPath ?? "unset" },
