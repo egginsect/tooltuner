@@ -1,3 +1,4 @@
+import { createPublicPreviewFetch } from "./public-preview-fetch.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
@@ -10,7 +11,7 @@ export interface UpstreamOptions {
   resolveAuth?: (reference: string, target: UpstreamTarget) => Promise<Record<string, string>>;
 }
 
-export type UpstreamTarget = Pick<Version, "owner_id" | "application" | "version_id" | "source" | "runtime_target" | "auth_config_ref">;
+export type UpstreamTarget = Pick<Version, "owner_id" | "application" | "version_id" | "source" | "runtime_target" | "auth_config_ref" | "public_access">;
 
 /** A received JSON-RPC error or malformed protocol result, distinct from a tool's isError result. */
 export class UpstreamProtocolError extends FlywheelError {}
@@ -41,6 +42,9 @@ async function withClient<T>(
   try {
     return await Promise.race([deadline, (async () => {
       let headers: Record<string, string> = {};
+      if (target.public_access && (target.auth_config_ref !== null || target.runtime_target.environment !== "preview" || target.public_access.provider !== "vercel")) {
+        throw new FlywheelError("forbidden", "Public preview policy cannot resolve credentials or target another environment.");
+      }
       if (target.auth_config_ref !== null) {
         if (!options.resolveAuth) throw new FlywheelError("operation_unavailable", "The selected version requires a configured upstream credential resolver.");
         headers = await options.resolveAuth(target.auth_config_ref, target);
@@ -48,6 +52,7 @@ async function withClient<T>(
       controller.signal.throwIfAborted();
       const transport = new StreamableHTTPClientTransport(new URL(target.runtime_target.url), {
         requestInit: { headers, signal: controller.signal, redirect: "error" },
+        ...(target.public_access ? { fetch: createPublicPreviewFetch(target.runtime_target.url, target.public_access.network_policy) } : {}),
       });
       await client.connect(transport, { signal: controller.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs });
       controller.signal.throwIfAborted();
