@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { Pool } from "pg";
+import { Pool, type QueryResultRow } from "pg";
 import { FlywheelError, canonicalJson } from "../contracts.js";
 import { CredentialBinding } from "../db/registry.js";
 import { OAuthCredential, type CredentialStore } from "./credentials.js";
@@ -7,9 +7,16 @@ import { OAuthCredential, type CredentialStore } from "./credentials.js";
 const unavailable = () => new FlywheelError("operation_unavailable", "Encrypted credential custody failed; verify storage, binding and key configuration or reconcile an interrupted refresh. No credential was acknowledged.");
 
 /** Run explicitly as a schema owner. Runtime roles need SELECT/INSERT/UPDATE only. */
-export const CREDENTIAL_SCHEMA = `CREATE TABLE IF NOT EXISTS flywheel_upstream_credentials (
+export const CREDENTIAL_SCHEMA = `CREATE TABLE IF NOT EXISTS public.flywheel_upstream_credentials (
   reference text PRIMARY KEY,
   binding text NOT NULL,
+  owner_id text NOT NULL,
+  CONSTRAINT credential_binding_owner CHECK (
+    jsonb_typeof(binding::jsonb -> 'owner_id') = 'string'
+    AND (binding::jsonb ->> 'owner_id') IS NOT NULL
+    AND owner_id = (binding::jsonb ->> 'owner_id')
+    AND length(owner_id) > 0
+  ),
   key_version text NOT NULL,
   nonce bytea NOT NULL CHECK (octet_length(nonce) = 12),
   ciphertext bytea NOT NULL,
@@ -37,7 +44,35 @@ export interface PostgresCredentialOptions {
   activeKeyVersion: string;
   /** False is permitted only for explicit loopback development. */
   tls: boolean;
+  /** Mandatory for hosted multiuser custody; false is legacy/local compatibility only. */
+  requireRls?: boolean;
 }
+
+// Fail closed if the connection cannot prove the reviewed backend-only RLS boundary.
+// Exact policy deparsing deliberately rejects unreviewed policy edits/version differences.
+const RLS_SCOPE_EXPRESSION = "((owner_id = NULLIF(current_setting('flywheel.credential_owner'::text, true), ''::text)) AND (binding = NULLIF(current_setting('flywheel.credential_binding'::text, true), ''::text)))";
+const RLS_RUNTIME_CHECK = `SELECT (
+  r.rolname = 'flywheel_credential_runtime' AND session_user = current_user
+  AND NOT r.rolsuper AND NOT r.rolbypassrls AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT r.rolreplication
+  AND c.relowner <> r.oid AND c.relrowsecurity AND c.relforcerowsecurity
+  AND NOT has_schema_privilege(r.oid, 'public', 'CREATE')
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname=current_database() AND datdba=r.oid)
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid OR roleid=r.oid)
+  AND (SELECT count(*) FROM pg_catalog.pg_policy WHERE polrelid=c.oid) = 1
+  AND EXISTS (SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid
+    AND p.polname='credential_backend_scope' AND p.polcmd='*' AND p.polpermissive
+    AND p.polroles=ARRAY[r.oid]
+    AND pg_catalog.pg_get_expr(p.polqual,p.polrelid)=$1
+    AND pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid)=$1)
+  AND NOT has_table_privilege(r.oid,c.oid,'DELETE,TRUNCATE,REFERENCES,TRIGGER')
+  AND NOT has_column_privilege(r.oid,c.oid,'reference','UPDATE')
+  AND NOT has_column_privilege(r.oid,c.oid,'binding','UPDATE')
+  AND NOT has_column_privilege(r.oid,c.oid,'owner_id','UPDATE')
+  AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles browser WHERE rolname IN ('anon','authenticated','service_role')
+    AND (has_table_privilege(browser.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+      OR has_any_column_privilege(browser.oid,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')))
+) AS safe FROM pg_catalog.pg_roles r CROSS JOIN pg_catalog.pg_class c
+WHERE r.rolname=current_user AND c.oid=to_regclass('public.flywheel_upstream_credentials')`;
 
 export function createPostgresCredentialStore(options: PostgresCredentialOptions): CredentialStore & { initialize(): Promise<void>; close(): Promise<void> } {
   const keys = new Map(Object.entries(options.keys).map(([version, key]) => [version, Buffer.from(key)]));
@@ -72,8 +107,37 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
     try { return OAuthCredential.parse(JSON.parse(plaintext.toString("utf8"))); }
     finally { plaintext.fill(0); }
   };
+  // The backend derives this context from the verified principal and owner-scoped
+  // registry. GUCs narrow accidental SQL access; they cannot constrain a compromised
+  // backend that has this database login. Browser roles have no credential access.
+  async function scopedQuery<T extends QueryResultRow = QueryResultRow>(owner: string, binding: string, sql: string, values: unknown[]) {
+    const client = await pool.connect();
+    let failed = false;
+    const onError = () => { failed = true; };
+    client.on("error", onError);
+    try {
+      await client.query("BEGIN");
+      if (failed) throw unavailable();
+      if (options.requireRls) {
+        const check = await client.query<{ safe: boolean }>(RLS_RUNTIME_CHECK, [RLS_SCOPE_EXPRESSION]);
+        if (failed || check.rows.length !== 1 || check.rows[0]?.safe !== true) throw unavailable();
+      }
+      await client.query("SELECT pg_catalog.set_config('flywheel.credential_owner', $1, true), pg_catalog.set_config('flywheel.credential_binding', $2, true)", [owner, binding]);
+      if (failed) throw unavailable();
+      const result = await client.query<T>(sql, values);
+      if (failed) throw unavailable();
+      await client.query("COMMIT");
+      if (failed) throw unavailable();
+      return result;
+    } catch (error) {
+      failed = true;
+      try { await client.query("ROLLBACK"); } catch { /* Discard uncertain connections. */ }
+      throw error;
+    } finally { client.removeListener("error", onError); client.release(failed); }
+  }
   // Scope a versioned read/claim/write sequence; concurrency is fenced by SQL CAS,
-  // not by a session lock. Every statement can use a different pooled connection.
+  // not by a session lock. Each short transaction can use a different connection.
+  // No transaction or checked-out connection spans remote OAuth network work.
   async function exclusive<T>(reference: string, target: CredentialBinding, work: (store: CredentialStore) => Promise<T>): Promise<T> {
     let active = true;
     try {
@@ -86,7 +150,7 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
         async get(ref, input = target) {
           assertActive();
           if (ref !== reference || identity(ref, input) !== binding) throw unavailable();
-          const result = await pool.query<EnvelopeRow>("SELECT * FROM flywheel_upstream_credentials WHERE reference=$1", [ref]);
+          const result = await scopedQuery<EnvelopeRow>(target.owner_id, binding, "SELECT * FROM public.flywheel_upstream_credentials WHERE reference=$1", [ref]);
           const row = result.rows[0];
           if (!row) throw unavailable();
           const value = open(binding, row);
@@ -98,7 +162,7 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
           if (version === undefined || claimed) throw unavailable();
           // One committed statement claims this version before any token request. A lost
           // acknowledgement must never be retried: the durable fence may already exist.
-          const result = await pool.query<{ token_version: number }>("UPDATE flywheel_upstream_credentials SET refreshing=true,token_version=token_version+1 WHERE reference=$1 AND binding=$2 AND token_version=$3 AND refreshing=false RETURNING token_version", [reference, binding, version]);
+          const result = await scopedQuery<{ token_version: number }>(target.owner_id, binding, "UPDATE public.flywheel_upstream_credentials SET refreshing=true,token_version=token_version+1 WHERE reference=$1 AND binding=$2 AND token_version=$3 AND refreshing=false RETURNING token_version", [reference, binding, version]);
           if (result.rowCount !== 1) throw unavailable();
           version = result.rows[0]!.token_version;
           claimed = true;
@@ -111,8 +175,8 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
           const e = seal(binding, secret);
           const params = [reference, binding, e.key_version, e.nonce, e.ciphertext, e.tag];
           const result = version === undefined
-            ? await pool.query("INSERT INTO flywheel_upstream_credentials (reference,binding,key_version,nonce,ciphertext,tag) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING", params)
-            : await pool.query("UPDATE flywheel_upstream_credentials SET key_version=$3,nonce=$4,ciphertext=$5,tag=$6,token_version=token_version+1,refreshing=false WHERE reference=$1 AND binding=$2 AND token_version=$7 AND refreshing=$8", [...params, version, claimed]);
+            ? await scopedQuery(target.owner_id, binding, "INSERT INTO public.flywheel_upstream_credentials (reference,binding,key_version,nonce,ciphertext,tag,owner_id) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING", [...params, target.owner_id])
+            : await scopedQuery(target.owner_id, binding, "UPDATE public.flywheel_upstream_credentials SET key_version=$3,nonce=$4,ciphertext=$5,tag=$6,token_version=token_version+1,refreshing=false WHERE reference=$1 AND binding=$2 AND token_version=$7 AND refreshing=$8", [...params, version, claimed]);
           if (result.rowCount !== 1) throw unavailable();
           version = (version ?? 0) + 1;
           claimed = false;

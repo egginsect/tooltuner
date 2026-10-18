@@ -22,6 +22,7 @@ import { createEvidenceService, createJobService, createExperimentService, creat
   type RunnerAdapter, type ManagerAdapter } from "./flywheel/index.js";
 import { createGatewayCore } from "./gateway/core.js";
 import { mountGateway, type GatewayCore } from "./gateway/mcp.js";
+import { createSupabaseAuth } from "./gateway/auth/supabase.js";
 import { FlywheelOAuthProvider } from "./gateway/oauth/provider.js";
 import { callUpstream, type UpstreamOptions } from "./gateway/upstream.js";
 import { createPreviewRegistry, type PreviewRegistryProject } from "./gateway/registry.js";
@@ -51,8 +52,8 @@ export const CredentialStoreConfiguration = z.discriminatedUnion("kind", [
 ]);
 
 /** External credentials are resolved only in the trusted operator/manager process. */
-export function createConfiguredCredentialStore(configuration: z.infer<typeof CredentialStoreConfiguration>, environment: NodeJS.ProcessEnv): CredentialStore {
-  if (configuration.kind === "postgres") return createPostgresCredentialStore({ ...configuration, ...credentialPostgresSecrets(environment) });
+export function createConfiguredCredentialStore(configuration: z.infer<typeof CredentialStoreConfiguration>, environment: NodeJS.ProcessEnv, requireRls = false): CredentialStore {
+  if (configuration.kind === "postgres") return createPostgresCredentialStore({ ...configuration, ...credentialPostgresSecrets(environment), requireRls });
   return configuration.kind === "helper" ? createCredentialHelperStore(configuration) : createEnvironmentCredentialStore(environment);
 }
 
@@ -101,7 +102,8 @@ export async function createRuntime(options: RuntimeOptions) {
   const { config, db } = options;
   const environment = options.environment ?? process.env;
   const hosted = config.runtimeMode === "hosted";
-  if (hosted && (config.runner.configPath || config.registry.fixtureRegistryPath || options.integrations?.runner || options.integrations?.manager ||
+  const multiuser = config.auth.mode === "supabase";
+  if ((hosted || multiuser) && (config.runner.configPath || config.registry.fixtureRegistryPath || options.integrations?.runner || options.integrations?.manager ||
       options.integrations?.repositories?.length || options.integrations?.runnerConfigs?.length || options.integrations?.experimentConfigs?.length)) {
     throw new Error("Hosted gateways cannot run local jobs, experiments, deployment managers or fixture seeding");
   }
@@ -125,7 +127,7 @@ export async function createRuntime(options: RuntimeOptions) {
   try {
   let previewProjects = integrations.previewProjects ?? [];
   if (config.credentials.activeKeyVersion) {
-    credentialStore = createConfiguredCredentialStore({ kind: "postgres", activeKeyVersion: config.credentials.activeKeyVersion, tls: true }, environment);
+    credentialStore = createConfiguredCredentialStore({ kind: "postgres", activeKeyVersion: config.credentials.activeKeyVersion, tls: true }, environment, multiuser);
     resolveAuth ??= createCredentialMediator({ db, store: credentialStore, timeoutMs: integrations.timeoutMs }).resolveAuth;
   }
   if (config.runner.configPath) {
@@ -196,7 +198,7 @@ export async function createRuntime(options: RuntimeOptions) {
   const previewConfigured = Boolean(manager && resolveAuth && (integrations.registerPreview || previewProjects.length));
   const jobs = createJobService({ db, repositories, runnerConfigs, runner, getPacket,
     manager: previewConfigured ? manager : undefined, registerPreview,
-    issueDevelopmentToken: config.oauth.resource ? async (grant) => {
+    issueDevelopmentToken: config.oauth.resource && !multiuser ? async (grant) => {
       if (grant.groups.length !== 1 || grant.groups[0] !== "development" || !grant.scope.job_id || !grant.scope.packet_id || grant.owner_id !== config.owner.id) {
         throw new FlywheelError("forbidden", "The coding credential must be development-only and bound to this owner, job and packet.");
       }
@@ -243,9 +245,9 @@ export async function createRuntime(options: RuntimeOptions) {
   }
   const mounts: ((app: Express) => void)[] = [];
   let provider: FlywheelOAuthProvider | undefined;
-  if (config.publicOrigin && config.oauth.resource && config.owner.secret) {
-    provider = new FlywheelOAuthProvider({ db, ownerId: config.owner.id, resource: config.oauth.resource, ownerSecret: config.owner.secret });
-    const gatewayOptions = { core, provider, publicOrigin: config.publicOrigin, resource: config.oauth.resource, log: options.log,
+  if (config.publicOrigin && config.oauth.resource && (multiuser || config.owner.secret)) {
+    provider = new FlywheelOAuthProvider({ db, ownerId: config.owner.id, resource: config.oauth.resource, ownerSecret: config.owner.secret, multiuser });
+    const gatewayOptions = { core, provider, ...(multiuser ? { humanAuth: createSupabaseAuth(config.auth.supabase!) } : {}), publicOrigin: config.publicOrigin, resource: config.oauth.resource, log: options.log,
       ...(hosted ? { trustProxy: false, rateLimitStore: (endpoint: string) => createGraphRateLimitStore(db, endpoint) } : {}) };
     mounts.push((app) => mountGateway(app, gatewayOptions));
     replace({ name: "flywheel_oauth", status: "unverified", critical: true,

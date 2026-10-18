@@ -34,8 +34,11 @@ export function configReadiness(config: Config): ReadinessItem[] {
   const oauthMissing = [
     config.publicOrigin === undefined ? "FLYWHEEL_PUBLIC_ORIGIN" : undefined,
     config.oauth.resource === undefined ? "OAUTH_RESOURCE (or FLYWHEEL_PUBLIC_ORIGIN)" : undefined,
-    config.owner.secret === undefined ? "FLYWHEEL_OWNER_SECRET" : undefined,
+    config.auth.mode === "owner-secret" && config.owner.secret === undefined ? "FLYWHEEL_OWNER_SECRET" : undefined,
   ].filter((entry): entry is string => entry !== undefined);
+  if (config.auth.mode === "supabase") items.push({ name: "supabase_auth", status: "unverified", critical: true,
+    detail: "Supabase password and Google sign-in configured; provider settings and real browser login are unverified",
+    action: "Configure the exact callback in Supabase, enable Google, and provision tenant-scoped grants for verified user UUIDs" });
   items.push(
     oauthMissing.length > 0
       ? { name: "flywheel_oauth", status: "not_configured", critical: true, detail: `Missing: ${oauthMissing.join(", ")}`, action: "Set the public origin and owner consent secret; create an owner grant with npm run owner -- grant create" }

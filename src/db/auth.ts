@@ -83,6 +83,8 @@ export async function getClient(db: GraphClient, clientId: string): Promise<Reco
 /* ------------------------------------------------------------------- codes */
 
 export interface StoredCode {
+  owner_id?: string;
+  subject?: string;
   family_id: string;
   client_id: string;
   grant_id: string;
@@ -124,6 +126,8 @@ export async function consumeCode(db: GraphClient, code: string, nowSec: number)
 /* ------------------------------------------------------------------ tokens */
 
 export interface StoredToken {
+  owner_id?: string;
+  subject?: string;
   kind: "access" | "refresh";
   client_id: string;
   grant_id: string;
@@ -148,27 +152,29 @@ export async function issueTokenPair(
   refreshExpires: number,
   previousRefresh?: string,
 ): Promise<boolean> {
+  if (value.owner_id !== undefined && value.owner_id !== ownerId) throw new Error("Token owner does not match grant namespace");
   const familyClause = previousRefresh === undefined
     ? `MERGE (f:OAuthFamily {family_id: $family})
-       ON CREATE SET f.revoked_at = null
-       WITH g, f WHERE f.revoked_at IS NULL`
+       ON CREATE SET f.revoked_at = null, f.owner_id = $owner, f.subject = $subject
+       WITH g, f WHERE f.revoked_at IS NULL AND f.owner_id = $owner AND f.subject = $subject`
     : `MATCH (f:OAuthFamily {family_id: $family}), (old:OAuthToken {token_hash: $previous, kind: 'refresh', family_id: $family})
-       WHERE f.revoked_at IS NULL AND old.revoked_at IS NULL AND old.expires_at > $now
+       WHERE f.revoked_at IS NULL AND f.owner_id = $owner AND f.subject = $subject
+         AND old.owner_id = $owner AND old.revoked_at IS NULL AND old.expires_at > $now
        SET old.revoked_at = $now`;
   const rows = await db.query<{ ok: boolean }>(
     `MATCH (g:Grant {grant_id: $grant, owner_id: $owner}) WHERE g.revoked_at IS NULL
      ${familyClause}
      CREATE (:OAuthToken {token_hash: $access, kind: 'access', client_id: $client, grant_id: $grant,
-       family_id: $family, expires_at: $accessExp, revoked_at: null, doc: $accessDoc}),
+       family_id: $family, owner_id: $owner, expires_at: $accessExp, revoked_at: null, doc: $accessDoc}),
        (:OAuthToken {token_hash: $refresh, kind: 'refresh', client_id: $client, grant_id: $grant,
-       family_id: $family, expires_at: $refreshExp, revoked_at: null, doc: $refreshDoc})
+       family_id: $family, owner_id: $owner, expires_at: $refreshExp, revoked_at: null, doc: $refreshDoc})
      RETURN true AS ok`,
     {
-      owner: ownerId, grant: value.grant_id, family: value.family_id, client: value.client_id,
+      owner: ownerId, subject: value.subject ?? `owner:${ownerId}`, grant: value.grant_id, family: value.family_id, client: value.client_id,
       previous: previousRefresh === undefined ? "" : hashSecret(previousRefresh), now: nowSec,
       access: hashSecret(access), refresh: hashSecret(refresh), accessExp: accessExpires, refreshExp: refreshExpires,
-      accessDoc: JSON.stringify({ ...value, kind: "access", expires_at: accessExpires }),
-      refreshDoc: JSON.stringify({ ...value, kind: "refresh", expires_at: refreshExpires }),
+      accessDoc: JSON.stringify({ ...value, owner_id: ownerId, subject: value.subject ?? `owner:${ownerId}`, kind: "access", expires_at: accessExpires }),
+      refreshDoc: JSON.stringify({ ...value, owner_id: ownerId, subject: value.subject ?? `owner:${ownerId}`, kind: "refresh", expires_at: refreshExpires }),
     },
     "issuing an OAuth token pair",
   );
@@ -179,15 +185,18 @@ export async function getToken(
   db: GraphClient,
   token: string,
 ): Promise<(StoredToken & { revoked: boolean }) | null> {
-  const rows = await db.roQuery<{ doc: string; revoked_at: unknown; family_id: string | null; family_revoked_at: unknown }>(
+  const rows = await db.roQuery<{ doc: string; revoked_at: unknown; family_id: string | null; family_revoked_at: unknown; token_owner: string | null; family_owner: string | null; family_subject: string | null }>(
     `MATCH (t:OAuthToken {token_hash: $hash})
      OPTIONAL MATCH (f:OAuthFamily {family_id: t.family_id})
-     RETURN t.doc AS doc, t.revoked_at AS revoked_at, f.family_id AS family_id, f.revoked_at AS family_revoked_at`,
+     RETURN t.doc AS doc, t.revoked_at AS revoked_at, f.family_id AS family_id, f.revoked_at AS family_revoked_at, t.owner_id AS token_owner, f.owner_id AS family_owner, f.subject AS family_subject`,
     { hash: hashSecret(token) },
     "reading a token",
   );
   const row = rows[0];
-  return row ? { ...(JSON.parse(row.doc) as StoredToken), revoked: row.revoked_at !== null || !row.family_id || row.family_revoked_at !== null } : null;
+  if (!row) return null;
+  const stored = JSON.parse(row.doc) as StoredToken;
+  const mismatched = stored.owner_id !== undefined && (stored.owner_id !== row.token_owner || stored.owner_id !== row.family_owner || stored.subject !== row.family_subject);
+  return { ...stored, revoked: mismatched || row.revoked_at !== null || !row.family_id || row.family_revoked_at !== null };
 }
 
 /** Durable tombstone also blocks concurrent/future replacement issuance. */
@@ -259,4 +268,22 @@ export async function consumePendingAuthorization(db: GraphClient, binding: Pend
      SET p.state = 'consumed' RETURN p.doc AS doc`,
     { ...pendingParams(binding, requestId, now), approve, selection: selectionHash }, "consuming an authorization request");
   return rows[0]?.doc ?? null;
+}
+
+/** Each browser OAuth attempt can exchange a code once, including across server instances. */
+export async function beginBrowserOAuth(db: GraphClient, binding: PendingBinding, requestId: string, now: number, verifierHash: string): Promise<boolean> {
+  const rows = await db.query<{ ok: boolean }>(
+    `MATCH (p:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource})
+     WHERE p.expires_at > $now AND p.state = 'login' AND p.callback_hash IS NULL
+     SET p.callback_hash = $verifier, p.callback_used = false RETURN true AS ok`,
+    { ...pendingParams(binding, requestId, now), verifier: verifierHash }, "starting browser OAuth");
+  return rows[0]?.ok === true;
+}
+export async function claimBrowserOAuth(db: GraphClient, binding: PendingBinding, requestId: string, now: number, verifierHash: string): Promise<boolean> {
+  const rows = await db.query<{ ok: boolean }>(
+    `MATCH (p:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource})
+     WHERE p.expires_at > $now AND p.state = 'login' AND p.callback_hash = $verifier AND p.callback_used = false
+     SET p.callback_used = true RETURN true AS ok`,
+    { ...pendingParams(binding, requestId, now), verifier: verifierHash }, "claiming browser OAuth callback");
+  return rows[0]?.ok === true;
 }

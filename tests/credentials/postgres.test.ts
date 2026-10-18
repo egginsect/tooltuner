@@ -2,14 +2,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
-import { Pool } from "pg";
-import { createPostgresCredentialStore } from "../../src/gateway/postgres-credentials.js";
+import { Client, Pool } from "pg";
+import { CREDENTIAL_SCHEMA, createPostgresCredentialStore } from "../../src/gateway/postgres-credentials.js";
 import type { CredentialBinding } from "../../src/db/registry.js";
 
 const connectionString = process.env.TEST_CREDENTIAL_POSTGRES_URL;
 if (!connectionString) throw new Error("Set TEST_CREDENTIAL_POSTGRES_URL to a disposable loopback PostgreSQL database; this suite creates its credential table.");
+const runtimeConnectionString = process.env.TEST_CREDENTIAL_POSTGRES_RUNTIME_URL ?? connectionString;
 const keys = { v1: randomBytes(32), v2: randomBytes(32) };
-const make = (activeKeyVersion = "v1", keyring = keys) => createPostgresCredentialStore({ connectionString, keys: keyring, activeKeyVersion, tls: false });
+const make = (activeKeyVersion = "v1", keyring = keys) => createPostgresCredentialStore({ connectionString: runtimeConnectionString, keys: keyring, activeKeyVersion, tls: false, requireRls: process.env.TEST_CREDENTIAL_REQUIRE_RLS === "1" });
 const store = make();
 const other = make();
 const db = new Pool({ connectionString });
@@ -20,7 +21,7 @@ const secret = { issuer: binding.issuer, environment: binding.environment, resou
   obtained_at: 1, client: { client_id: "synthetic-client", client_secret: "synthetic-client-secret" },
   tokens: { access_token: "synthetic-access-secret", refresh_token: "synthetic-refresh-secret", token_type: "Bearer" } };
 const reference = () => `postgres:test-${randomUUID()}`;
-beforeAll(() => store.initialize());
+beforeAll(() => db.query(CREDENTIAL_SCHEMA));
 afterAll(async () => { await store.close(); await other.close(); await db.end(); });
 
 test("roundtrips with ciphertext-only rows and authenticates each exact binding field", async () => {
@@ -56,12 +57,12 @@ test("independent store sessions fence refresh and reject stale CAS without over
     await locked.get(ref); await locked.beginRefresh!();
     await expect(other.get(ref, binding)).rejects.toThrow();
     const child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
-      import { createPostgresCredentialStore } from './src/gateway/postgres-credentials.ts';
+      import { CREDENTIAL_SCHEMA, createPostgresCredentialStore } from './src/gateway/postgres-credentials.ts';
       const store = createPostgresCredentialStore({ connectionString: process.env.TEST_URL,
-        keys: { v1: Buffer.from(process.env.TEST_KEY, 'base64') }, activeKeyVersion: 'v1', tls: false });
+        keys: { v1: Buffer.from(process.env.TEST_KEY, 'base64') }, activeKeyVersion: 'v1', tls: false, requireRls: process.env.TEST_CREDENTIAL_REQUIRE_RLS === '1' });
       try { await store.get(process.env.TEST_REF, JSON.parse(process.env.TEST_BINDING)); process.exitCode = 2; }
       catch { process.stdout.write('blocked'); } finally { await store.close(); }
-    `], { env: { PATH: process.env.PATH, TEST_URL: connectionString, TEST_KEY: keys.v1.toString("base64"), TEST_REF: ref, TEST_BINDING: JSON.stringify(binding) }, timeout: 5000 });
+    `], { env: { PATH: process.env.PATH, TEST_URL: runtimeConnectionString, TEST_CREDENTIAL_REQUIRE_RLS: process.env.TEST_CREDENTIAL_REQUIRE_RLS, TEST_KEY: keys.v1.toString("base64"), TEST_REF: ref, TEST_BINDING: JSON.stringify(binding) }, timeout: 5000 });
     expect(child.stdout).toBe("blocked");
     await locked.put!(ref, { ...secret, tokens: { ...secret.tokens, access_token: "synthetic-new-access" } });
   });
@@ -137,15 +138,21 @@ test("network work does not pin database connections and scoped handles expire",
 
 test.each(["claim", "completion"] as const)("lost %s acknowledgement fails closed after a committed statement", async (stage) => {
   const ref = reference(); await store.put!(ref, secret, binding);
-  const original = Pool.prototype.query;
+  const original = Client.prototype.query;
+  const pending = new WeakSet<Client>();
   let requests = 0;
   let injected = false;
-  const fault = vi.spyOn(Pool.prototype, "query").mockImplementation((async function (this: Pool, ...args: unknown[]) {
+  const fault = vi.spyOn(Client.prototype, "query").mockImplementation((async function (this: Client, ...args: unknown[]) {
     const result = await Reflect.apply(original, this, args);
     const sql = args[0];
     if (!injected && typeof sql === "string" && sql.startsWith(stage === "claim"
-      ? "UPDATE flywheel_upstream_credentials SET refreshing=true"
-      : "UPDATE flywheel_upstream_credentials SET key_version=")) {
+      ? "UPDATE public.flywheel_upstream_credentials SET refreshing=true"
+      : "UPDATE public.flywheel_upstream_credentials SET key_version=")) {
+      pending.add(this);
+    }
+    // Inject only after COMMIT: an UPDATE acknowledgement lost before COMMIT
+    // is rolled back by the new short-transaction wrapper.
+    if (!injected && sql === "COMMIT" && pending.has(this)) {
       injected = true;
       throw new Error("synthetic lost database acknowledgement");
     }
@@ -166,4 +173,24 @@ test.each(["claim", "completion"] as const)("lost %s acknowledgement fails close
     expect(requests).toBe(1);
     expect((await other.get(ref, binding) as typeof secret).tokens.access_token).toBe("synthetic-committed");
   }
+});
+
+
+test("checked-out connection errors are handled and never acknowledged", async () => {
+  const ref = reference();
+  const original = Client.prototype.query;
+  let injected = false;
+  const fault = vi.spyOn(Client.prototype, "query").mockImplementation((async function (this: Client, ...args: unknown[]) {
+    const result = await Reflect.apply(original, this, args);
+    if (!injected && args[0] === "COMMIT") {
+      injected = true;
+      this.emit("error", new Error("synthetic checked-out connection loss"));
+    }
+    return result;
+  }) as typeof original);
+  try { await expect(store.put!(ref, secret, binding)).rejects.toThrow("Encrypted credential custody failed"); }
+  finally { fault.mockRestore(); }
+  expect(injected).toBe(true);
+  // COMMIT completed, so the durable row can exist despite the rejected acknowledgement.
+  expect(await other.get(ref, binding)).toEqual(secret);
 });
