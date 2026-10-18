@@ -29,6 +29,7 @@ export function createApp(deps: AppDeps): Express {
   app.disable("x-powered-by");
 
   app.get("/healthz", async (_request: Request, response: Response) => {
+    response.set("Cache-Control", "no-store");
     if (!deps.lifecycle.admissionOpen) {
       response.status(503).json({ status: "draining", service: SERVICE_NAME, instance_id: deps.instanceId, pending_calls: deps.lifecycle.pending().length });
       return;
@@ -39,10 +40,10 @@ export function createApp(deps: AppDeps): Express {
         status: "ok",
         service: SERVICE_NAME,
         instance_id: deps.instanceId,
-        checks: { falkordb: { status: "ok", graph: storage.graph, schema_version: storage.schema_version } },
+        checks: { falkordb: { status: "ok", schema_version: storage.schema_version } },
       });
     } catch (error) {
-      const body = error instanceof StorageError ? error.toBody() : new StorageError("storage_unavailable", "Storage check failed", { cause: error }).toBody();
+      const body = publicStorageError(error, "storage_unavailable", "Storage check failed");
       response.status(503).json({ status: "unavailable", service: SERVICE_NAME, instance_id: deps.instanceId, checks: { falkordb: { status: "failed" } }, error: body });
     }
   });
@@ -55,9 +56,15 @@ export function createApp(deps: AppDeps): Express {
 
   // Express recognizes error handlers by their four-argument signature.
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
-    const body = error instanceof StorageError ? error.toBody() : new StorageError("internal_error", "Unhandled server error").toBody();
+    const body = publicStorageError(error, "internal_error", "The server could not process this request");
     response.status(500).json({ error: body });
   });
 
   return app;
+}
+
+/** Public diagnostics retain error classification, never driver text or topology. */
+function publicStorageError(error: unknown, fallback: "storage_unavailable" | "internal_error", message: string) {
+  if (error instanceof StorageError) return { ...error.toBody(), message };
+  return new StorageError(fallback, message).toBody();
 }
