@@ -80,7 +80,7 @@ The [editable Archify JSON](docs/architecture.json) is included alongside it.
 
 This source-based overview distinguishes the request-only hosted gateway from optional local
 workers. Transaction-pooler credential refresh is implemented and tested in the review PR
-stack, not a claim of merged main or live rollout. Supabase Auth remains planned.
+stack, not a claim of merged main or live rollout. The architecture snapshot predates the Supabase login implementation described below; live provider setup remains pending.
 Schema, layout and artifact checks passed; browser visual review was blocked by the execution
 environment. The diagram contains no private deployment endpoints or upstream identities.
 
@@ -108,3 +108,7 @@ Optional upstream OAuth custody: [PostgreSQL encryption, exact-target bindings a
 
 For protected MCP servers without token introspection, see [standard OAuth owner linking](docs/standard-oauth.md) for explicit PKCE/device acquisition, encrypted custody and selected-tool remote enrollment.
 
+
+## Multiuser sign-in
+
+[Supabase Auth integration](docs/supabase-auth.md) adds email/password and Google login for existing accounts, with each verified UUID owning separate grants and data. The existing MCP authorization server still enforces explicit grant consent. [Credential RLS](docs/credential-rls.md) describes the required backend-only database role and policies; Supabase mode rejects an unsafe credential connection. Provider setup, migration execution and account lifecycle synchronization are separate operational work.

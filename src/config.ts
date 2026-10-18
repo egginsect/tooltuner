@@ -29,7 +29,10 @@ const EnvSchema = z.object({
   FLYWHEEL_PUBLIC_ORIGIN: optional(originSchema),
   OAUTH_ISSUER: optional(z.url()),
   OAUTH_RESOURCE: optional(z.url()),
-  FLYWHEEL_OWNER_ID: z.preprocess(emptyToUndefined, z.string().regex(/^[a-z][a-z0-9-]{0,62}$/).default("owner")),
+  FLYWHEEL_AUTH_MODE: z.preprocess(emptyToUndefined, z.enum(["owner-secret", "supabase"]).default("owner-secret")),
+  SUPABASE_URL: optional(originSchema),
+  SUPABASE_PUBLISHABLE_KEY: optional(z.string().regex(/^sb_publishable_[A-Za-z0-9_-]+$/, "Use a Supabase publishable key, never a secret or service_role key")),
+  FLYWHEEL_OWNER_ID: z.preprocess(emptyToUndefined, z.union([z.string().regex(/^[a-z][a-z0-9-]{0,62}$/), z.string().uuid()]).default("owner")),
   FLYWHEEL_OWNER_SECRET: optional(z.string().min(16, "Use at least 16 characters")),
   FIXTURE_REGISTRY_PATH: optional(z.string()),
   RUNNER_CONFIG_PATH: optional(z.string()),
@@ -45,6 +48,7 @@ const EnvSchema = z.object({
 
 export interface Config {
   runtimeMode: "local" | "hosted";
+  auth: { mode: "owner-secret" | "supabase"; supabase?: { url: string; publishableKey: string } };
   credentials: { activeKeyVersion: string | undefined; connectionMode: "direct" | "session" | "transaction" | undefined };
   http: { host: string; port: number };
   database: { url: string; graph: string; username: string | undefined; password: string | undefined; connectTimeoutMs: number; queryTimeoutMs: number; maxReconnectAttempts?: number };
@@ -101,7 +105,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!publicOrigin?.startsWith("https://") || ["localhost", "127.0.0.1", "[::1]"].includes(new URL(publicOrigin).hostname)) {
       problems.push("FLYWHEEL_PUBLIC_ORIGIN: hosted mode requires a fixed public HTTPS origin");
     }
-    if (!values.FLYWHEEL_OWNER_SECRET || values.FLYWHEEL_OWNER_SECRET.length < 32) problems.push("FLYWHEEL_OWNER_SECRET: hosted mode requires at least 32 characters");
+    if (values.FLYWHEEL_AUTH_MODE === "owner-secret" && (!values.FLYWHEEL_OWNER_SECRET || values.FLYWHEEL_OWNER_SECRET.length < 32)) problems.push("FLYWHEEL_OWNER_SECRET: hosted mode requires at least 32 characters");
     if (values.RUNNER_CONFIG_PATH) problems.push("RUNNER_CONFIG_PATH: local runner configuration is disabled in hosted mode");
     if (values.FIXTURE_REGISTRY_PATH) problems.push("FIXTURE_REGISTRY_PATH: fixture seeding is disabled in hosted mode");
     if (values.VERCEL_TOKEN) problems.push("VERCEL_TOKEN: manager deployment credentials must not be installed in the hosted gateway");
@@ -113,10 +117,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (values.FLYWHEEL_RUNTIME_MODE === "hosted" && !values.FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION && (values.FLYWHEEL_CREDENTIAL_POSTGRES_URL || values.FLYWHEEL_CREDENTIAL_KEYS)) {
     problems.push("FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION: required when hosted credential custody secrets are configured");
   }
+  if (values.FLYWHEEL_AUTH_MODE === "supabase") {
+    if (!values.SUPABASE_URL?.startsWith("https://") || !values.SUPABASE_PUBLISHABLE_KEY) problems.push("Supabase mode requires SUPABASE_URL (HTTPS) and SUPABASE_PUBLISHABLE_KEY");
+    if (!publicOrigin?.startsWith("https://")) problems.push("Supabase mode requires an HTTPS FLYWHEEL_PUBLIC_ORIGIN for secure browser cookies");
+    if (values.FLYWHEEL_OWNER_SECRET) problems.push("Do not configure FLYWHEEL_OWNER_SECRET in Supabase mode; owner-secret authentication is disabled");
+    if (values.RUNNER_CONFIG_PATH || values.FIXTURE_REGISTRY_PATH) problems.push("Supabase mode does not support local runners or global-owner fixture seeding");
+  }
   if (problems.length > 0) throw new ConfigError(problems);
 
   return {
     runtimeMode: values.FLYWHEEL_RUNTIME_MODE,
+    auth: { mode: values.FLYWHEEL_AUTH_MODE, ...(values.FLYWHEEL_AUTH_MODE === "supabase" ? { supabase: { url: values.SUPABASE_URL!, publishableKey: values.SUPABASE_PUBLISHABLE_KEY! } } : {}) },
     credentials: { activeKeyVersion: values.FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION, connectionMode: values.FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE },
     http: { host: values.HOST, port: values.PORT },
     database: { url: values.FALKORDB_URL, graph: values.FALKORDB_GRAPH, username: values.FALKORDB_USERNAME, password: values.FALKORDB_PASSWORD, connectTimeoutMs: values.FALKORDB_CONNECT_TIMEOUT_MS, queryTimeoutMs: values.FALKORDB_QUERY_TIMEOUT_MS,
@@ -138,6 +149,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 export function describeConfig(config: Config): Record<string, unknown> {
   return {
     runtimeMode: config.runtimeMode,
+    auth: { mode: config.auth.mode, supabase: config.auth.supabase ? "configured" : "unset" },
     credentials: { activeKeyVersion: config.credentials.activeKeyVersion ?? "unset", connectionMode: config.credentials.connectionMode ?? "unset" },
     http: config.http,
     database: {

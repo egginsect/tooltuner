@@ -31,6 +31,10 @@ import {
 import { FLYWHEEL_SCOPE, isSafeOAuthRedirect, type AuthExtra, type FlywheelOAuthProvider } from "./oauth/provider.js";
 import { renderConsentError } from "./oauth/consent.js";
 
+import { mountHumanAuth } from "./auth/routes.js";
+import type { HumanAuth } from "./auth/supabase.js";
+import { clearFlow, flowCookie, readCookie, sessionCookie } from "./auth/browser.js";
+
 export interface GatewayContext {
   principal: Principal;
   grant: Grant;
@@ -45,6 +49,7 @@ export interface GatewayCore {
 
 export interface GatewayMountOptions {
   provider: FlywheelOAuthProvider;
+  humanAuth?: HumanAuth;
   core: GatewayCore;
   /** Public origin, e.g. https://flywheel.example.ngrok.app (issuer). */
   publicOrigin: string;
@@ -189,6 +194,11 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
     next();
   };
   app.use(["/oauth/owner-login", "/oauth/consent"], consentHeaders);
+  if (opts.provider.multiuser) {
+    if (!opts.humanAuth) throw new Error("Multiuser OAuth requires Supabase authentication");
+    mountHumanAuth(app, { auth: opts.humanAuth, provider: opts.provider, origin: opts.publicOrigin,
+      limiter: rateLimit({ windowMs: 15 * 60_000, limit: 40, standardHeaders: true, legacyHeaders: false, ...limits("human-auth") }) });
+  }
   app.post("/oauth/owner-login",
     rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false, ...limits("owner-login") }),
     express.urlencoded({ extended: false, limit: "16kb" }),
@@ -220,13 +230,24 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
         return;
       }
       const body = parsed.data;
+      let userId: string | undefined;
+      let browserToken: string | undefined;
+      if (opts.provider.multiuser) {
+        browserToken = readCookie(req, flowCookie(body.request_id));
+        if (req.get("origin") !== opts.publicOrigin || !await opts.provider.checkBrowser(body.request_id, browserToken)) {
+          res.status(403).type("html").send(renderConsentError("Consent requires the original browser request.")); return;
+        }
+        try { userId = await opts.humanAuth!.user(readCookie(req, sessionCookie(body.request_id))); }
+        catch { clearFlow(res, body.request_id); res.status(403).type("html").send(renderConsentError("Sign-in expired. Restart the connection.")); return; }
+      }
       const outcome = await opts.provider.completeConsent({
-        requestId: body.request_id,
+        requestId: body.request_id, userId, browserToken,
         grantId: body.grant_id ?? "",
         selectionToken: body.selection_token,
         approve: body.decision === "approve",
       });
       if ("redirectTo" in outcome) {
+        if (opts.provider.multiuser) clearFlow(res, body.request_id);
         log("oauth consent completed", { approved: body.decision === "approve", grant_id: body.grant_id });
         res.redirect(302, outcome.redirectTo);
       } else {
@@ -278,7 +299,7 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
   };
   app.get("/mcp", bearer, notAllowed);
   app.delete("/mcp", bearer, notAllowed);
-  app.use(["/mcp", "/authorize", "/token", "/register", "/revoke", "/oauth/owner-login", "/oauth/consent"], (error: unknown, _req: Request, res: Response, next: NextFunction) => {
+  app.use(["/auth", "/mcp", "/authorize", "/token", "/register", "/revoke", "/oauth/owner-login", "/oauth/consent"], (error: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) { next(error); return; }
     const storage = error instanceof StorageError;
     const status = storage ? 503 : (error as { status?: number })?.status === 400 ? 400 : 500;

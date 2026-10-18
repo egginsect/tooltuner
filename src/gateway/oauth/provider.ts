@@ -22,7 +22,10 @@ import type {
 import type { Grant, Principal } from "../../contracts.js";
 import type { GraphClient } from "../../db/client.js";
 import * as store from "../../db/auth.js";
-import { renderConsentPage, renderOwnerLoginPage, renderConsentError } from "./consent.js";
+import { renderConsentPage, renderOwnerLoginPage, renderUserLoginPage, renderConsentError } from "./consent.js";
+
+import { flowCookie, writeCookie } from "../auth/browser.js";
+import { UserId } from "../auth/supabase.js";
 
 export const FLYWHEEL_SCOPE = "flywheel";
 export const ACCESS_TTL_SEC = 3600;
@@ -36,6 +39,9 @@ export interface PendingAuthorization {
   params: AuthorizationParams;
   resource: string;
   expiresAt: number;
+  browserHash?: string;
+  ownerId?: string;
+  subject?: string;
   selectionHash?: string;
   selectionExpiresAt?: number;
 }
@@ -47,6 +53,8 @@ export interface ProviderOptions {
   resource: string;
   /** Owner consent secret from the environment; never logged or rendered. */
   ownerSecret: string | undefined;
+  /** Supabase users own separate UUID namespaces; legacy owner authority is disabled. */
+  multiuser?: boolean;
   now?: () => number;
 }
 
@@ -76,6 +84,37 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     this.#db = opts.db;
     this.#opts = opts;
     this.#now = opts.now ?? Date.now;
+  }
+
+  get multiuser(): boolean { return this.#opts.multiuser === true; }
+  get #pendingBinding(): store.PendingBinding {
+    return { ownerId: this.multiuser ? "supabase-pending" : this.#opts.ownerId, resource: this.#opts.resource };
+  }
+  #identity(record: { owner_id?: string; subject?: string }): { ownerId: string; subject: string } {
+    if (this.multiuser) {
+      if (!UserId.safeParse(record.owner_id).success || record.subject !== `supabase:${record.owner_id}`) throw new InvalidTokenError("Invalid tenant identity");
+      return { ownerId: record.owner_id!, subject: record.subject! };
+    }
+    if (record.owner_id !== undefined && record.owner_id !== this.#opts.ownerId) throw new InvalidTokenError("Invalid owner identity");
+    return { ownerId: this.#opts.ownerId, subject: `owner:${this.#opts.ownerId}` };
+  }
+  async checkBrowser(requestId: string, browserToken: string): Promise<boolean> {
+    if (!this.multiuser || !/^[A-Za-z0-9_-]{43}$/.test(browserToken)) return false;
+    const doc = await store.readPendingAuthorization(this.#db, this.#pendingBinding, requestId, this.#now());
+    if (!doc) return false;
+    const pending = JSON.parse(doc) as PendingAuthorization;
+    return pending.expiresAt > this.#now() && pending.browserHash === store.hashSecret(browserToken);
+  }
+  async browserOAuth(requestId: string, browserToken: string, verifier: string, claim: boolean): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(verifier) || !await this.checkBrowser(requestId, browserToken)) return false;
+    const operation = claim ? store.claimBrowserOAuth : store.beginBrowserOAuth;
+    return operation(this.#db, this.#pendingBinding, requestId, this.#now(), store.hashSecret(verifier));
+  }
+  async authenticateUser(input: { requestId: string; browserToken: string; userId: string }): Promise<{ html: string } | { error: string; status: number }> {
+    if (!UserId.safeParse(input.userId).success || !await this.checkBrowser(input.requestId, input.browserToken)) {
+      return { status: 403, error: "Sign-in does not match this browser authorization request." };
+    }
+    return this.#select(input.requestId, input.userId, `supabase:${input.userId}`);
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
@@ -129,40 +168,46 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     if (!/^[A-Za-z0-9_-]{43}$/.test(params.codeChallenge)) throw new InvalidRequestError("A valid S256 PKCE challenge is required");
     const requestId = randomToken();
     const now = this.#now();
-    const created = await store.insertPendingAuthorization(this.#db, this.#opts, requestId,
-      JSON.stringify({ client, params, resource, expiresAt: now + PENDING_TTL_MS }), now + PENDING_TTL_MS, now);
+    const browserToken = this.multiuser ? randomToken() : undefined;
+    const created = await store.insertPendingAuthorization(this.#db, this.#pendingBinding, requestId,
+      JSON.stringify({ client, params, resource, expiresAt: now + PENDING_TTL_MS, ...(browserToken ? { browserHash: store.hashSecret(browserToken) } : {}) }), now + PENDING_TTL_MS, now);
     if (!created) throw new TemporarilyUnavailableError("Too many pending authorization requests; retry later");
+    if (browserToken) writeCookie(res, flowCookie(requestId), browserToken);
     res
       .status(200)
       .set({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
         "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" })
-      .send(renderOwnerLoginPage({ requestId, client, resource, ownerSecretConfigured: !!this.#opts.ownerSecret }));
+      .send(browserToken ? renderUserLoginPage({ requestId, client, resource, browserToken }) : renderOwnerLoginPage({ requestId, client, resource, ownerSecretConfigured: !!this.#opts.ownerSecret }));
   }
 
   /** Step 2: the owner secret is used only here, never copied into a page or URL. */
   async authenticateOwner(input: { requestId: string; ownerSecret: string }): Promise<{ html: string } | { error: string; status: number }> {
-    const document = await store.readPendingAuthorization(this.#db, this.#opts, input.requestId, this.#now());
+    if (this.multiuser || !this.#secretMatches(input.ownerSecret)) {
+      return { status: 403, error: "Owner secret authentication is unavailable or invalid." };
+    }
+    return this.#select(input.requestId, this.#opts.ownerId, `owner:${this.#opts.ownerId}`);
+  }
+
+  async #select(requestId: string, ownerId: string, subject: string): Promise<{ html: string } | { error: string; status: number }> {
+    const document = await store.readPendingAuthorization(this.#db, this.#pendingBinding, requestId, this.#now());
     const pending = document ? JSON.parse(document) as PendingAuthorization : null;
     if (!pending || pending.expiresAt <= this.#now() || pending.selectionHash !== undefined) {
-      return { status: 400, error: "This login request expired or was already used. Restart the connection from your client." };
-    }
-    if (!this.#secretMatches(input.ownerSecret)) {
-      return { status: 403, error: "Owner secret is incorrect. Go back and try again." };
+      return { status: 400, error: "This login request expired or was already used. Restart the connection." };
     }
     // Claim login before awaiting storage so concurrent login cannot create two capabilities.
-    if (!await store.claimPendingLogin(this.#db, this.#opts, input.requestId, this.#now())) {
+    if (!await store.claimPendingLogin(this.#db, this.#pendingBinding, requestId, this.#now())) {
       return { status: 400, error: "This login request expired or was already used. Restart the connection from your client." };
     }
-    const grants = (await store.listGrants(this.#db, this.#opts.ownerId)).filter((g) => g.revoked_at === null);
+    const grants = (await store.listGrants(this.#db, ownerId)).filter((g) => g.owner_id === ownerId && g.revoked_at === null);
     if (pending.expiresAt <= this.#now()) return { status: 400, error: "Authorization expired. Restart the connection from your client." };
     const selectionToken = randomToken();
     const selectionHash = store.hashSecret(selectionToken);
     const selectionExpiresAt = Math.min(pending.expiresAt, this.#now() + SELECTION_TTL_MS);
-    if (!await store.finishPendingLogin(this.#db, this.#opts, input.requestId, this.#now(),
-      JSON.stringify({ ...pending, selectionHash, selectionExpiresAt }), selectionHash, selectionExpiresAt)) {
+    if (!await store.finishPendingLogin(this.#db, this.#pendingBinding, requestId, this.#now(),
+      JSON.stringify({ ...pending, ownerId, subject, selectionHash, selectionExpiresAt }), selectionHash, selectionExpiresAt)) {
       return { status: 400, error: "Authorization expired. Restart the connection from your client." };
     }
-    return { html: renderConsentPage({ requestId: input.requestId, selectionToken, client: pending.client,
+    return { html: renderConsentPage({ requestId: requestId, selectionToken, client: pending.client,
       resource: pending.resource, redirectUri: pending.params.redirectUri, grants }) };
   }
 
@@ -171,17 +216,24 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     requestId: string;
     grantId: string;
     selectionToken?: string;
+    userId?: string;
+    browserToken?: string;
     approve: boolean;
   }): Promise<{ redirectTo: string } | { error: string; status: number }> {
-    const document = await store.readPendingAuthorization(this.#db, this.#opts, input.requestId, this.#now());
+    const document = await store.readPendingAuthorization(this.#db, this.#pendingBinding, input.requestId, this.#now());
     const pending = document ? JSON.parse(document) as PendingAuthorization : null;
     if (!pending || pending.expiresAt <= this.#now()) {
       return { status: 400, error: "This authorization request expired. Restart the connection from your client." };
     }
+    if (this.multiuser && (!input.userId || pending.ownerId !== input.userId || pending.subject !== `supabase:${input.userId}` ||
+        !input.browserToken || !await this.checkBrowser(input.requestId, input.browserToken))) {
+      return { status: 403, error: "Consent requires the same signed-in account and browser." };
+    }
+    const ownerId = this.multiuser ? pending.ownerId! : this.#opts.ownerId;
     const redirect = new URL(pending.params.redirectUri);
     if (pending.params.state !== undefined) redirect.searchParams.set("state", pending.params.state);
     if (!input.approve) {
-      if (!await store.consumePendingAuthorization(this.#db, this.#opts, input.requestId, this.#now(), false, "")) {
+      if (!await store.consumePendingAuthorization(this.#db, this.#pendingBinding, input.requestId, this.#now(), false, "")) {
         return { status: 400, error: "Authorization expired or was already used. Restart the connection from your client." };
       }
       redirect.searchParams.set("error", "access_denied");
@@ -192,15 +244,16 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
       return { status: 403, error: "Grant selection requires owner login. Restart the connection if your selection page expired." };
     }
     // Claim this browser request before awaiting storage, preventing double approval.
-    if (!await store.consumePendingAuthorization(this.#db, this.#opts, input.requestId, this.#now(), true, store.hashSecret(input.selectionToken))) {
+    if (!await store.consumePendingAuthorization(this.#db, this.#pendingBinding, input.requestId, this.#now(), true, store.hashSecret(input.selectionToken))) {
       return { status: 400, error: "Authorization expired or was already used. Restart the connection from your client." };
     }
     const grant = await store.getGrant(this.#db, input.grantId);
-    if (!grant || grant.owner_id !== this.#opts.ownerId || grant.revoked_at !== null) {
+    if (!grant || grant.owner_id !== ownerId || grant.revoked_at !== null) {
       return { status: 400, error: "Choose an active grant owned by this server. Restart the connection to try again." };
     }
     const code = randomToken();
     await store.insertCode(this.#db, code, {
+      owner_id: ownerId, subject: pending.subject ?? `owner:${ownerId}`,
       family_id: randomUUID(),
       client_id: pending.client.client_id,
       grant_id: grant.grant_id,
@@ -225,6 +278,7 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
   async challengeForAuthorizationCode(client: OAuthClientInformationFull, code: string): Promise<string> {
     const stored = await store.peekCode(this.#db, code);
     if (!stored || stored.client_id !== client.client_id) throw new InvalidGrantError("Invalid authorization code");
+    this.#identity(stored);
     return stored.code_challenge;
   }
 
@@ -249,7 +303,8 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     if (resource !== undefined && this.#checkResource(resource) !== stored.resource) {
       throw new InvalidTargetError("resource does not match the authorization request");
     }
-    return this.#issue(stored.client_id, stored.grant_id, stored.family_id, stored.resource, stored.scopes);
+    const identity = this.#identity(stored);
+    return this.#issue(stored.client_id, stored.grant_id, stored.family_id, stored.resource, stored.scopes, identity);
   }
 
   async exchangeRefreshToken(
@@ -263,6 +318,7 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     if (!stored || stored.kind !== "refresh" || stored.client_id !== client.client_id) {
       throw new InvalidGrantError("Invalid refresh token");
     }
+    const identity = this.#identity(stored);
     if (stored.revoked) {
       // Reuse of a rotated token: assume theft and end the whole session.
       await store.revokeFamily(this.#db, stored.family_id, nowSec);
@@ -277,16 +333,16 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
       throw new InvalidTargetError("Refresh cannot change the resource");
     }
     const grant = await store.getGrant(this.#db, stored.grant_id);
-    if (!grant || grant.owner_id !== this.#opts.ownerId || grant.revoked_at !== null) throw new InvalidGrantError("The grant behind this session was revoked");
-    return this.#issue(stored.client_id, stored.grant_id, stored.family_id, stored.resource, scopes ?? stored.scopes, refreshToken);
+    if (!grant || grant.owner_id !== identity.ownerId || grant.revoked_at !== null) throw new InvalidGrantError("The grant behind this session was revoked");
+    return this.#issue(stored.client_id, stored.grant_id, stored.family_id, stored.resource, scopes ?? stored.scopes, identity, refreshToken);
   }
 
-  async #issue(clientId: string, grantId: string, familyId: string, resource: string, scopes: string[], previousRefresh?: string): Promise<OAuthTokens> {
+  async #issue(clientId: string, grantId: string, familyId: string, resource: string, scopes: string[], identity: { ownerId: string; subject: string }, previousRefresh?: string): Promise<OAuthTokens> {
     const nowSec = Math.floor(this.#now() / 1000);
     const access = randomToken();
     const refresh = randomToken();
-    const base = { client_id: clientId, grant_id: grantId, family_id: familyId, resource, scopes };
-    const issued = await store.issueTokenPair(this.#db, access, refresh, base, this.#opts.ownerId,
+    const base = { owner_id: identity.ownerId, subject: identity.subject, client_id: clientId, grant_id: grantId, family_id: familyId, resource, scopes };
+    const issued = await store.issueTokenPair(this.#db, access, refresh, base, identity.ownerId,
       nowSec, nowSec + ACCESS_TTL_SEC, nowSec + REFRESH_TTL_SEC, previousRefresh);
     if (!issued) {
       await store.revokeFamily(this.#db, familyId, nowSec);
@@ -308,11 +364,12 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     if (!stored || stored.kind !== "access" || stored.revoked) throw new InvalidTokenError("Invalid access token");
     if (stored.expires_at <= nowSec) throw new InvalidTokenError("Access token expired");
     if (stored.resource !== this.#opts.resource) throw new InvalidTokenError("Token was issued for another resource");
+    const identity = this.#identity(stored);
     const grant = await store.getGrant(this.#db, stored.grant_id);
-    if (!grant || grant.owner_id !== this.#opts.ownerId || grant.revoked_at !== null) throw new InvalidTokenError("The grant behind this token was revoked");
+    if (!grant || grant.owner_id !== identity.ownerId || grant.revoked_at !== null) throw new InvalidTokenError("The grant behind this token was revoked");
     const principal: Principal = {
       owner_id: grant.owner_id,
-      subject: `owner:${grant.owner_id}`,
+      subject: identity.subject,
       client_id: stored.client_id,
       grant_id: grant.grant_id,
       session_id: stored.family_id,
@@ -331,14 +388,15 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     const stored = await store.getToken(this.#db, request.token);
     // RFC 7009: unknown tokens and other clients' tokens are silently ignored.
     if (!stored || stored.client_id !== client.client_id) return;
+    this.#identity(stored);
     await store.revokeFamily(this.#db, stored.family_id, Math.floor(this.#now() / 1000));
   }
 
   /** Loads the current grant for a verified principal (revocation takes effect immediately). */
   async loadGrant(principal: Principal): Promise<Grant> {
-    if (principal.owner_id !== this.#opts.ownerId) throw new InvalidTokenError("Invalid token owner");
+    const identity = this.#identity(principal);
     const grant = await store.getGrant(this.#db, principal.grant_id);
-    if (!grant || grant.owner_id !== this.#opts.ownerId || grant.revoked_at !== null) throw new InvalidTokenError("The grant behind this token was revoked");
+    if (!grant || grant.owner_id !== identity.ownerId || grant.revoked_at !== null) throw new InvalidTokenError("The grant behind this token was revoked");
     if (grant.owner_id !== principal.owner_id) throw new InvalidTokenError("Invalid token owner");
     return grant;
   }

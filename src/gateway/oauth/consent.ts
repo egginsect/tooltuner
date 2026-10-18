@@ -83,3 +83,16 @@ export function renderConsentError(message: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Authorization error</title></head><body style="font:15px system-ui;max-width:640px;margin:2rem auto">
 <h1>Authorization error</h1><p>${esc(message)}</p><p>Go back and try again.</p></body></html>`;
 }
+
+export function renderUserLoginPage(input: { requestId: string; browserToken: string; client: OAuthClientInformationFull; resource: string }): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Tooltuner</title></head>
+<body style="font:15px system-ui;max-width:640px;margin:2rem auto;padding:0 1rem"><h1>Sign in to authorize a client</h1>
+<p><b>${esc(input.client.client_name ?? input.client.client_id)}</b> requests access to <code>${esc(input.resource)}</code>.</p>
+<p>Use your existing account. Sign-in does not approve access. You will review your own grants next.</p>
+<form method="post" action="/auth/password"><input type="hidden" name="request_id" value="${esc(input.requestId)}"><input type="hidden" name="csrf" value="${esc(input.browserToken)}">
+<p><label>Email <input type="email" name="email" autocomplete="username" required maxlength="320"></label></p>
+<p><label>Password <input type="password" name="password" autocomplete="current-password" required maxlength="4096"></label></p>
+<button type="submit">Sign in</button></form>
+<form method="post" action="/auth/google"><input type="hidden" name="request_id" value="${esc(input.requestId)}"><input type="hidden" name="csrf" value="${esc(input.browserToken)}"><button type="submit">Continue with Google</button></form>
+<p>No grants appear until an operator has provisioned access for your account. Existing client permissions are managed separately from this sign-in.</p></body></html>`;
+}

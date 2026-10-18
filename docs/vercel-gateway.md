@@ -15,15 +15,14 @@ operator-approved steps.
 - MCP is stateless Streamable HTTP with JSON responses. No connection-local sessions or
   standalone SSE subscriptions are required. Clients use `/mcp` and discover the OAuth
   endpoints on the same fixed origin.
-- Pending authorization, owner-authenticated grant selection, codes, tokens, grants, registry
+- Pending authorization, authenticated per-user grant selection, codes, tokens, grants, registry
   records and evidence live in the shared FalkorDB graph. Replacing an instance must not
   discard a pending OAuth interaction. One-time capabilities retain atomic consumption.
 - Hosted OAuth rate limits use shared graph counters for `/authorize`, `/token`, `/register`,
-  `/revoke`, `/oauth/owner-login` and `/oauth/consent`. Buckets are endpoint-global for this
-  single-owner gateway, so spoofed forwarding headers cannot evade them. They fail closed
+  `/revoke`, `/oauth/owner-login`, `/oauth/consent` and the Supabase `/auth` routes. Buckets are endpoint-global, so spoofed forwarding headers cannot evade them. They fail closed
   when storage fails. Default budgets are 100 authorizations, 50 token requests, 50
   revocations and 20 owner-login/consent requests per 15 minutes; registration allows 20
-  per hour. Heavy traffic from one client can limit others. Use separate graphs for separate
+  per hour; Supabase auth routes share 40 requests per 15 minutes. Heavy traffic from one client can limit others. Use separate graphs for separate
   gateways/environments; sharing a graph also shares these budgets.
 - Local runners, job starts, local fixture seeding and deployment managers are disabled.
   The hosted process must not receive the manager's `VERCEL_TOKEN`. Local `npm start`,
@@ -57,8 +56,10 @@ values, copy another checkout's `.env` or `.vercel` state, or print credentials 
 | Variable | Requirement |
 | --- | --- |
 | `FLYWHEEL_PUBLIC_ORIGIN` | One fixed public HTTPS origin, without a path or trailing slash. Never infer it from a request Host header or ephemeral preview URL. |
-| `FLYWHEEL_OWNER_ID` | The owner namespace used by existing grants and registry records. Defaults to `owner`. |
-| `FLYWHEEL_OWNER_SECRET` | A high-entropy consent secret, at least 32 characters in hosted mode. |
+| `FLYWHEEL_AUTH_MODE` | Set `supabase` for independent users. The legacy `owner-secret` default remains for compatibility, with no automatic fallback between modes. |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Required in Supabase mode: exact HTTPS project origin and publishable key. See [Auth setup](supabase-auth.md). |
+| `FLYWHEEL_OWNER_ID` | Legacy owner namespace or explicit administrative CLI target UUID. Never selects the hosted Supabase user. |
+| `FLYWHEEL_OWNER_SECRET` | Legacy mode only: at least 32 characters in hosted mode. Must be unset in Supabase mode. |
 | `FALKORDB_URL` | An external TLS endpoint using `rediss://` or `falkors://`, with no embedded credentials. Loopback and plaintext endpoints are rejected. |
 | `FALKORDB_GRAPH` | A dedicated graph for this gateway/environment. |
 | `FALKORDB_USERNAME` | The service's ACL username if required. |
@@ -99,7 +100,7 @@ connection/query timeouts and short idle retention. Account for the number of co
 function instances in the database connection budget. The hosted function does not run DDL
 for PostgreSQL; initialize its schema separately using the established owner workflow and
 retain a least-privilege runtime role. Existing target bindings and refresh fences remain in
-force. Optional custody configuration does not enroll an upstream or verify its credentials.
+force. Supabase multiuser mode requires the [restricted credential role and RLS migration](credential-rls.md), verified on every adapter transaction; an administrative or bypass-RLS connection fails closed. Optional custody configuration does not enroll an upstream or verify its credentials.
 
 ## Startup failures and request duration
 
@@ -142,7 +143,7 @@ After deployment is separately authorized and succeeds, verify from outside the 
    only the chosen fixed origin and its `/mcp` resource.
 3. Unauthenticated `/mcp` is 401 with correct resource metadata. Authenticated clients see
    exactly `list_apps`, `describe`, `dispatch` and only grant-authorized inner tools.
-4. DCR, S256 PKCE, owner login, separate grant selection, code exchange, refresh and grant
+4. DCR, S256 PKCE, the configured human login mode, separate grant selection, code exchange, refresh and grant
    revocation work through actual Vercel rewrites. Start authorization on one cold instance
    and complete it on another; replayed consent/code/token operations fail appropriately.
 5. Rate limits persist across separate instances and cannot be bypassed using altered
