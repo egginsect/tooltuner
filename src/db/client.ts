@@ -10,6 +10,8 @@ export interface GraphClientOptions {
   /** Per-query timeout. A timed-out write has an unknown outcome. */
   queryTimeoutMs?: number;
   connectTimeoutMs?: number;
+  /** Hosted startup must not wait forever for a failed connection. */
+  maxReconnectAttempts?: number;
 }
 
 /** JSON-like values accepted as Cypher parameters. Values always travel as parameters, never in query text. */
@@ -82,6 +84,7 @@ export class GraphClient {
     // `disableOfflineQueue` is a node-redis option that the falkordb typings omit. Without it a
     // write issued during an outage would be queued and applied after reconnect, after the caller
     // was already told it failed. Fail fast instead.
+    let connected = false;
     const driverOptions = {
       url: options.url,
       ...(options.username ? { username: options.username } : {}),
@@ -89,7 +92,8 @@ export class GraphClient {
       disableOfflineQueue: true,
       socket: {
         connectTimeout: options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
-        reconnectStrategy: (retries: number) => Math.min(250 * 2 ** retries, 5_000),
+        reconnectStrategy: (retries: number) => !connected && options.maxReconnectAttempts !== undefined && retries >= options.maxReconnectAttempts
+          ? false : Math.min(250 * 2 ** retries, 5_000),
       },
     } as unknown as FalkorDBOptions;
     let db: FalkorDB | undefined;
@@ -100,6 +104,7 @@ export class GraphClient {
       });
       const client = new GraphClient(db, options.graph, endpoint, timeoutMs);
       await client.ping();
+      connected = true;
       return client;
     } catch (error) {
       if (db) await db.close().catch(() => undefined);

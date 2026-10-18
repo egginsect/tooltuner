@@ -70,7 +70,6 @@ export function isSafeOAuthRedirect(uri: string): boolean {
 export class FlywheelOAuthProvider implements OAuthServerProvider {
   readonly #db: GraphClient;
   readonly #opts: ProviderOptions;
-  readonly #pending = new Map<string, PendingAuthorization>();
   readonly #now: () => number;
 
   constructor(opts: ProviderOptions) {
@@ -128,10 +127,11 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     const resource = this.#checkResource(params.resource);
     if ((params.scopes ?? []).some((scope) => scope !== FLYWHEEL_SCOPE)) throw new InvalidScopeError("Only the flywheel scope is supported");
     if (!/^[A-Za-z0-9_-]{43}$/.test(params.codeChallenge)) throw new InvalidRequestError("A valid S256 PKCE challenge is required");
-    this.#sweep();
-    if (this.#pending.size >= 1000) throw new TemporarilyUnavailableError("Too many pending authorization requests; retry later");
     const requestId = randomToken();
-    this.#pending.set(requestId, { client, params, resource, expiresAt: this.#now() + PENDING_TTL_MS });
+    const now = this.#now();
+    const created = await store.insertPendingAuthorization(this.#db, this.#opts, requestId,
+      JSON.stringify({ client, params, resource, expiresAt: now + PENDING_TTL_MS }), now + PENDING_TTL_MS, now);
+    if (!created) throw new TemporarilyUnavailableError("Too many pending authorization requests; retry later");
     res
       .status(200)
       .set({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
@@ -141,7 +141,8 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
 
   /** Step 2: the owner secret is used only here, never copied into a page or URL. */
   async authenticateOwner(input: { requestId: string; ownerSecret: string }): Promise<{ html: string } | { error: string; status: number }> {
-    const pending = this.#pending.get(input.requestId);
+    const document = await store.readPendingAuthorization(this.#db, this.#opts, input.requestId, this.#now());
+    const pending = document ? JSON.parse(document) as PendingAuthorization : null;
     if (!pending || pending.expiresAt <= this.#now() || pending.selectionHash !== undefined) {
       return { status: 400, error: "This login request expired or was already used. Restart the connection from your client." };
     }
@@ -149,12 +150,18 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
       return { status: 403, error: "Owner secret is incorrect. Go back and try again." };
     }
     // Claim login before awaiting storage so concurrent login cannot create two capabilities.
-    this.#pending.delete(input.requestId);
+    if (!await store.claimPendingLogin(this.#db, this.#opts, input.requestId, this.#now())) {
+      return { status: 400, error: "This login request expired or was already used. Restart the connection from your client." };
+    }
     const grants = (await store.listGrants(this.#db, this.#opts.ownerId)).filter((g) => g.revoked_at === null);
     if (pending.expiresAt <= this.#now()) return { status: 400, error: "Authorization expired. Restart the connection from your client." };
     const selectionToken = randomToken();
-    this.#pending.set(input.requestId, { ...pending, selectionHash: store.hashSecret(selectionToken),
-      selectionExpiresAt: Math.min(pending.expiresAt, this.#now() + SELECTION_TTL_MS) });
+    const selectionHash = store.hashSecret(selectionToken);
+    const selectionExpiresAt = Math.min(pending.expiresAt, this.#now() + SELECTION_TTL_MS);
+    if (!await store.finishPendingLogin(this.#db, this.#opts, input.requestId, this.#now(),
+      JSON.stringify({ ...pending, selectionHash, selectionExpiresAt }), selectionHash, selectionExpiresAt)) {
+      return { status: 400, error: "Authorization expired. Restart the connection from your client." };
+    }
     return { html: renderConsentPage({ requestId: input.requestId, selectionToken, client: pending.client,
       resource: pending.resource, redirectUri: pending.params.redirectUri, grants }) };
   }
@@ -166,15 +173,17 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     selectionToken?: string;
     approve: boolean;
   }): Promise<{ redirectTo: string } | { error: string; status: number }> {
-    const pending = this.#pending.get(input.requestId);
+    const document = await store.readPendingAuthorization(this.#db, this.#opts, input.requestId, this.#now());
+    const pending = document ? JSON.parse(document) as PendingAuthorization : null;
     if (!pending || pending.expiresAt <= this.#now()) {
-      this.#pending.delete(input.requestId);
       return { status: 400, error: "This authorization request expired. Restart the connection from your client." };
     }
     const redirect = new URL(pending.params.redirectUri);
     if (pending.params.state !== undefined) redirect.searchParams.set("state", pending.params.state);
     if (!input.approve) {
-      this.#pending.delete(input.requestId);
+      if (!await store.consumePendingAuthorization(this.#db, this.#opts, input.requestId, this.#now(), false, "")) {
+        return { status: 400, error: "Authorization expired or was already used. Restart the connection from your client." };
+      }
       redirect.searchParams.set("error", "access_denied");
       return { redirectTo: redirect.href };
     }
@@ -183,7 +192,9 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
       return { status: 403, error: "Grant selection requires owner login. Restart the connection if your selection page expired." };
     }
     // Claim this browser request before awaiting storage, preventing double approval.
-    this.#pending.delete(input.requestId);
+    if (!await store.consumePendingAuthorization(this.#db, this.#opts, input.requestId, this.#now(), true, store.hashSecret(input.selectionToken))) {
+      return { status: 400, error: "Authorization expired or was already used. Restart the connection from your client." };
+    }
     const grant = await store.getGrant(this.#db, input.grantId);
     if (!grant || grant.owner_id !== this.#opts.ownerId || grant.revoked_at !== null) {
       return { status: 400, error: "Choose an active grant owned by this server. Restart the connection to try again." };
@@ -209,11 +220,6 @@ export class FlywheelOAuthProvider implements OAuthServerProvider {
     const a = createHash("sha256").update(candidate).digest();
     const b = createHash("sha256").update(expected).digest();
     return timingSafeEqual(a, b);
-  }
-
-  #sweep(): void {
-    const now = this.#now();
-    for (const [id, p] of this.#pending) if (p.expiresAt <= now || (p.selectionExpiresAt !== undefined && p.selectionExpiresAt <= now)) this.#pending.delete(id);
   }
 
   async challengeForAuthorizationCode(client: OAuthClientInformationFull, code: string): Promise<string> {

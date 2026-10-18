@@ -1,5 +1,5 @@
 import type { Response } from "express";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newId, SCHEMA_VERSION, type Grant, type Principal } from "../../src/contracts.js";
 import type { GraphClient } from "../../src/db/client.js";
 import { StorageError } from "../../src/errors.js";
@@ -15,6 +15,34 @@ const client = { client_id: "public-client", redirect_uris: ["https://client.exa
 const principal: Principal = { owner_id: "owner", subject: "owner:owner", client_id: client.client_id, grant_id: grant.grant_id, session_id: "session" };
 const options = { db, ownerId: "owner", resource: "https://gateway.example/mcp", ownerSecret: "test-owner-consent-secret" };
 const outage = new StorageError("storage_unavailable", "test storage failure");
+// Shared storage double: separate provider objects observe atomic transitions.
+beforeEach(() => {
+  const records = new Map<string, { doc: string; expires: number; state: string; selection?: string; selectionExpires?: number }>();
+  const key = (binding: store.PendingBinding, id: string) => `${binding.ownerId}|${binding.resource}|${id}`;
+  vi.spyOn(store, "insertPendingAuthorization").mockImplementation(async (_db, binding, id, doc, expires) => {
+    records.set(key(binding, id), { doc, expires, state: "login" }); return true;
+  });
+  vi.spyOn(store, "readPendingAuthorization").mockImplementation(async (_db, binding, id, now) => {
+    const row = records.get(key(binding, id));
+    return row && row.expires > now && ["login", "selection"].includes(row.state) ? row.doc : null;
+  });
+  vi.spyOn(store, "claimPendingLogin").mockImplementation(async (_db, binding, id, now) => {
+    const row = records.get(key(binding, id));
+    if (!row || row.expires <= now || row.state !== "login") return null;
+    row.state = "claimed"; return row.doc;
+  });
+  vi.spyOn(store, "finishPendingLogin").mockImplementation(async (_db, binding, id, now, doc, selection, selectionExpires) => {
+    const row = records.get(key(binding, id));
+    if (!row || row.expires <= now || row.state !== "claimed") return false;
+    Object.assign(row, { doc, selection, selectionExpires, state: "selection" }); return true;
+  });
+  vi.spyOn(store, "consumePendingAuthorization").mockImplementation(async (_db, binding, id, now, approve, selection) => {
+    const row = records.get(key(binding, id));
+    if (!row || row.expires <= now || !["login", "selection"].includes(row.state) ||
+      (approve && (row.state !== "selection" || row.selection !== selection || row.selectionExpires! <= now))) return null;
+    row.state = "consumed"; return row.doc;
+  });
+});
 afterEach(() => vi.restoreAllMocks());
 
 async function pending(provider: FlywheelOAuthProvider) {
@@ -37,6 +65,32 @@ async function login(provider: FlywheelOAuthProvider, id: string): Promise<strin
 }
 
 describe("OAuth trust boundaries", () => {
+  it("continues login and consent on different instances and only approves once", async () => {
+    const first = new FlywheelOAuthProvider(options);
+    const second = new FlywheelOAuthProvider(options);
+    const id = await pending(first);
+    const token = await login(second, id);
+    vi.spyOn(store, "getGrant").mockResolvedValue(grant);
+    const codes = vi.spyOn(store, "insertCode").mockResolvedValue();
+    const input = { requestId: id, selectionToken: token, grantId: grant.grant_id, approve: true };
+    const outcomes = await Promise.all([first.completeConsent(input), second.completeConsent(input)]);
+    expect(outcomes.filter((result) => "redirectTo" in result)).toHaveLength(1);
+    expect(codes).toHaveBeenCalledOnce();
+  });
+
+  it("claims concurrent owner login only once and isolates owner/resource", async () => {
+    const first = new FlywheelOAuthProvider(options);
+    const id = await pending(first);
+    for (const changed of [{ ownerId: "another-owner" }, { resource: "https://another.example/mcp" }]) {
+      const other = new FlywheelOAuthProvider({ ...options, ...changed });
+      expect(await other.authenticateOwner({ requestId: id, ownerSecret: options.ownerSecret })).toMatchObject({ status: 400 });
+    }
+    const second = new FlywheelOAuthProvider(options);
+    const outcomes = await Promise.all([first, second].map((p) => p.authenticateOwner({ requestId: id, ownerSecret: options.ownerSecret })));
+    expect(outcomes.filter((result) => "html" in result)).toHaveLength(1);
+    expect(store.listGrants).toHaveBeenCalledOnce();
+  });
+
   it("cannot approve consent without a configured owner secret", async () => {
     const provider = new FlywheelOAuthProvider({ ...options, ownerSecret: undefined });
     const id = await pending(provider);
