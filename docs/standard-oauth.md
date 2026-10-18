@@ -31,3 +31,9 @@ OAuth scopes may cover a much broader surface than the selected tools. Keep the 
 There is no anonymous-endpoint rejection or independent audience introspection claim in standard mode: trust is the configured issuer, fresh resource-bound acquisition, authenticated custody and the resource server's acceptance. Do not select this mode for a provider whose resource server cannot be trusted to enforce its own authorization.
 
 A provider that omits scope initially but explicitly returns an empty scope on refresh cannot renew a credential requiring a nonempty scope. Flywheel fails closed; fix the provider's scope handling or perform a fresh owner authorization. No provider-specific exception is built in.
+
+## Safe device-flow diagnostics
+
+Device failures expose only a fixed stage, an HTTP status when received, and a recognized OAuth error code (unknown values become `unrecognized_error`). Raw provider errors, descriptions, bodies, request details and original exception causes are never retained. A network failure at `token_poll` has no HTTP status; malformed JSON reports `token_response` with the received status. Explicit local expiry reports `poll_expiry`. These diagnostics identify the failure boundary without claiming a missing provider response was observed.
+
+Programmatic callers may capture `onUserCode` and return immediately, then wait for `onPoll` with HTTP 400 `authorization_pending` before showing the captured complete verification URL to the owner. Never await a pending poll inside `onUserCode`, because polling starts after that callback returns. `onPoll` carries only the same safe fields and never includes a device code, user code, token or URL. The original complete verification URI must be preserved rather than rebuilt or replaced by its query-free base URI.

@@ -9,7 +9,7 @@ import {
 } from "../../src/gateway/credentials.js";
 import { readUpstreamCatalog } from "../../src/gateway/upstream.js";
 import { beginUpstreamAccountLink, linkUpstreamAccount, verifyResourceMetadata, type LinkOptions } from "../../src/cli/link.js";
-import { beginDeviceAccountLink } from "../../src/cli/device-link.js";
+import { DeviceAuthorizationError, beginDeviceAccountLink } from "../../src/cli/device-link.js";
 
 vi.mock("@modelcontextprotocol/sdk/client/auth.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("@modelcontextprotocol/sdk/client/auth.js")>(),
@@ -651,4 +651,90 @@ describe("standard OAuth device authorization", () => {
     expect(store.put).toHaveBeenCalledOnce();
     expect(registry.putUpstreamAccount).not.toHaveBeenCalled();
   });
+  it.each(["server_error", "access_denied", "expired_token", "invalid_client", "untrusted-secret-error"])("reports only allowlisted OAuth failure %s", async (oauth_error) => {
+    const { options, store } = begin();
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: oauth_error,
+      error_description: "private-provider-description synthetic-device-code", access_token: "private-token", arbitrary: "private-body" }), { status: 500 }));
+    const result = outcome(options);
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = (await result).error as DeviceAuthorizationError;
+    expect(error).toBeInstanceOf(DeviceAuthorizationError);
+    expect(error.diagnostic).toEqual({ stage: "token_response", http_status: 500,
+      oauth_error: oauth_error === "untrusted-secret-error" ? "unrecognized_error" : oauth_error });
+    expect(Object.isFrozen(error.diagnostic)).toBe(true);
+    expect(error).not.toHaveProperty("cause");
+    const serialized = JSON.stringify(error) + error.message;
+    for (const value of ["private-provider-description", "synthetic-device-code", "private-token", "private-body", "untrusted-secret-error"]) expect(serialized).not.toContain(value);
+    expect(store.put).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("distinguishes a transport failure from an HTTP response without preserving its raw cause", async () => {
+    const { options } = begin();
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("private transport error https://secret.example/?device_code=secret"));
+    const result = outcome(options);
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = (await result).error as DeviceAuthorizationError;
+    expect(error.diagnostic).toEqual({ stage: "token_poll" });
+    expect(JSON.stringify(error) + error.message).not.toContain("private transport");
+    expect(JSON.stringify(error) + error.message).not.toContain("secret.example");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports invalid JSON using only response stage and status", async () => {
+    const { options } = begin();
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("private non-json response", { status: 502 }));
+    const result = outcome(options);
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = (await result).error as DeviceAuthorizationError;
+    expect(error.diagnostic).toEqual({ stage: "token_response", http_status: 502 });
+    expect(JSON.stringify(error) + error.message).not.toContain("private non-json");
+  });
+
+  it("emits a safe pending event before the caller releases its captured complete verification URL", async () => {
+    const { options } = begin();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "authorization_pending", error_description: "private-description" }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(accessResponse), { status: 200 }));
+    let captured: { verification_uri: string; verification_uri_complete?: string; user_code: string; expires_in: number } | undefined;
+    const released: unknown[] = [];
+    const onPoll = vi.fn((diagnostic: unknown) => {
+      expect(diagnostic).toEqual({ stage: "token_response", http_status: 400, oauth_error: "authorization_pending" });
+      released.push(captured);
+    });
+    const result = outcome({ ...options, onUserCode: (handoff) => { captured = handoff; }, onPoll });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(captured).toBeDefined(); expect(released).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onPoll).toHaveBeenCalledOnce();
+    expect(released).toEqual([expect.objectContaining({ verification_uri_complete: deviceResponse.verification_uri_complete })]);
+    expect(JSON.stringify(onPoll.mock.calls)).not.toContain("private-description");
+    expect(JSON.stringify(onPoll.mock.calls)).not.toContain(deviceResponse.device_code);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await result).error).toBeUndefined();
+  });
+
+  it("does not preserve an owner handoff callback's thrown sensitive message", async () => {
+    const { options } = begin();
+    const result = await outcome({ ...options, onUserCode: () => { throw new Error("private-owner-code ABCD-EFGH"); } });
+    const error = result.error as DeviceAuthorizationError;
+    expect(error.diagnostic).toEqual({ stage: "owner_handoff" });
+    expect(JSON.stringify(error) + error.message).not.toContain("private-owner-code");
+    expect(JSON.stringify(error) + error.message).not.toContain("ABCD-EFGH");
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not emit a pending handoff event after the device lifetime expires", async () => {
+    const { options } = begin({ expires_in: 2 });
+    vi.mocked(fetch).mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 });
+    });
+    const onPoll = vi.fn();
+    const result = outcome({ ...options, onPoll });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect((await result).error).toMatchObject({ diagnostic: { stage: "poll_expiry" } });
+    expect(onPoll).not.toHaveBeenCalled();
+  });
+
 });
