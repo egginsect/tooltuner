@@ -2,15 +2,17 @@ import { spawn } from "node:child_process";
 import { z } from "zod";
 import { discoverAuthorizationServerMetadata, refreshAuthorization } from "@modelcontextprotocol/sdk/client/auth.js";
 import { OAuthTokensSchema, OAuthClientInformationSchema } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { FlywheelError, canonicalJson } from "../contracts.js";
+import { FlywheelError, canonicalJson, canonicalDigest } from "../contracts.js";
 import {
   UpstreamAccount, CredentialBinding, getUpstreamAccount, getCredentialBinding, putCredentialBinding,
 } from "../db/registry.js";
 import type { GraphClient } from "../db/client.js";
-import { boundedTimeout, type UpstreamTarget } from "./upstream.js";
+import { boundedTimeout, readUpstreamCatalog, type UpstreamTarget } from "./upstream.js";
 
 /** Implementations must never print requests, responses or underlying helper errors. */
 export interface CredentialStore {
+  /** Only the authenticated encrypted adapter supplies this custody guarantee. */
+  custody?: "encrypted_postgres";
   get(reference: string, binding?: CredentialBinding): Promise<unknown>;
   put?(reference: string, secret: unknown, binding?: CredentialBinding): Promise<void>;
   exclusive?<T>(reference: string, binding: CredentialBinding, work: (store: CredentialStore) => Promise<T>): Promise<T>;
@@ -61,6 +63,8 @@ export const OAuthCredential = z.object({
   issuer: z.string().url(), environment: z.enum(["local", "preview", "production"]),
   resource: z.string().url(), audience: z.string().min(1), obtained_at: z.number().int().nonnegative(),
   client: OAuthClientInformationSchema, tokens: OAuthTokensSchema,
+  acquisition: z.object({ method: z.enum(["authorization_code_s256", "device_authorization"]), authority_digest: z.string(),
+    binding_digest: z.string(), scopes: z.array(z.string()).min(1), acquired_at: z.number().int().nonnegative() }).strict().optional(),
 }).strict();
 export type OAuthCredential = z.infer<typeof OAuthCredential>;
 
@@ -74,10 +78,11 @@ export function secureUrl(value: string, environment: UpstreamAccount["environme
 }
 
 /** Fetch with an exact origin allowlist, no redirects and bounded time; never carries inbound auth. */
-export function credentialFetch(account: Pick<UpstreamAccount, "issuer" | "introspection_url" | "environment">, timeoutMs = 10_000): typeof fetch {
+export function credentialFetch(account: Pick<UpstreamAccount, "issuer" | "introspection_url" | "environment" | "validation_mode">, timeoutMs = 10_000): typeof fetch {
   const issuer = secureUrl(account.issuer, account.environment);
-  const inspection = secureUrl(account.introspection_url, account.environment);
-  if (inspection.origin !== issuer.origin) throw new FlywheelError("forbidden", "Token introspection must use the configured issuer origin.");
+  if (account.validation_mode !== "standard_oauth" && !account.introspection_url) throw new FlywheelError("forbidden", "Introspection mode requires its configured endpoint.");
+  const inspection = account.introspection_url ? secureUrl(account.introspection_url, account.environment) : undefined;
+  if (inspection && inspection.origin !== issuer.origin) throw new FlywheelError("forbidden", "Token introspection must use the configured issuer origin.");
   return async (input, init) => {
     const target = new URL(input instanceof Request ? input.url : input.toString());
     if (secureUrl(target.href, account.environment).origin !== issuer.origin) throw new FlywheelError("forbidden", "OAuth discovery or token endpoint escaped the configured issuer origin.");
@@ -85,10 +90,11 @@ export function credentialFetch(account: Pick<UpstreamAccount, "issuer" | "intro
   };
 }
 
-export async function discoverAccountIssuer(account: Pick<UpstreamAccount, "issuer" | "introspection_url" | "environment">, timeoutMs = 10_000) {
+export async function discoverAccountIssuer(account: Pick<UpstreamAccount, "issuer" | "introspection_url" | "environment" | "validation_mode"> & { scopes?: string[] }, timeoutMs = 10_000) {
   try {
     const metadata = await discoverAuthorizationServerMetadata(account.issuer, { fetchFn: credentialFetch(account, timeoutMs) });
     if (!metadata || metadata.issuer !== account.issuer || !metadata.token_endpoint) throw new Error("Issuer mismatch");
+    if (account.validation_mode === "standard_oauth" && metadata.scopes_supported !== undefined && account.scopes?.some((scope) => !metadata.scopes_supported!.includes(scope))) throw new Error("Issuer scope mismatch");
     secureUrl(metadata.token_endpoint, account.environment);
     if (new URL(metadata.token_endpoint).origin !== new URL(account.issuer).origin) throw new Error("Token origin mismatch");
     return metadata;
@@ -119,7 +125,7 @@ export async function inspectAccessToken(account: UpstreamAccount, binding: Cred
   const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
   if (secret.client.client_secret) headers["authorization"] = `Basic ${Buffer.from(`${encodeURIComponent(account.client_id)}:${encodeURIComponent(secret.client.client_secret)}`).toString("base64")}`;
   try {
-    const response = await credentialFetch(account, timeoutMs)(account.introspection_url, { method: "POST", headers, body });
+    const response = await credentialFetch(account, timeoutMs)(account.introspection_url!, { method: "POST", headers, body });
     if (!response.ok) throw new Error("Introspection unavailable");
     const result = z.object({ active: z.literal(true), aud: z.union([z.string(), z.array(z.string()).min(1)]), scope: z.string(),
       client_id: z.string(), iss: z.string().optional(), exp: z.number().optional(), token_type: z.string().optional() }).parse(await response.json());
@@ -132,11 +138,48 @@ export async function inspectAccessToken(account: UpstreamAccount, binding: Cred
   } catch { throw new FlywheelError("forbidden", "OAuth token introspection did not prove the exact audience, client, issuer and approved scopes."); }
 }
 
+/** These digests are custody provenance, never independently verified token claims. */
+export function acquisitionProvenance(account: UpstreamAccount, binding: CredentialBinding, method: "authorization_code_s256" | "device_authorization" = "authorization_code_s256") {
+  return { method,
+    authority_digest: canonicalDigest(account, ["created_at"]),
+    binding_digest: canonicalDigest(binding, ["created_at"]), scopes: [...account.scopes],
+    acquired_at: Math.floor(Date.now() / 1000) };
+}
+
+export function validateStandardTokens(account: UpstreamAccount, binding: CredentialBinding, secret: OAuthCredential): void {
+  const proof = secret.acquisition;
+  const expected = acquisitionProvenance(account, binding);
+  const scopes = secret.tokens.scope?.split(/\s+/u).filter(Boolean) ?? proof?.scopes ?? [];
+  const now = Date.now() / 1000;
+  if (binding.url !== binding.resource || binding.audience !== binding.resource || secret.resource !== binding.resource || secret.audience !== binding.audience ||
+      !proof || proof.authority_digest !== expected.authority_digest || proof.binding_digest !== expected.binding_digest ||
+      proof.acquired_at > now + 5 || proof.acquired_at > secret.obtained_at || secret.obtained_at > now + 5 ||
+      canonicalJson([...proof.scopes].sort()) !== canonicalJson([...account.scopes].sort()) ||
+      (secret.tokens.expires_in !== undefined && (!Number.isFinite(secret.tokens.expires_in) || secret.tokens.expires_in <= 0)) ||
+      !secret.tokens.access_token.trim() || secret.tokens.token_type.toLowerCase() !== "bearer" ||
+      binding.scopes.some((scope) => !scopes.includes(scope)) || scopes.some((scope) => !account.scopes.includes(scope))) {
+    throw new FlywheelError("forbidden", "Standard OAuth requires exact-resource owner acquisition provenance, valid token lifetime and approved scopes.");
+  }
+}
+
+async function verifyResourceAcceptance(binding: CredentialBinding, headers: Record<string, string>, timeoutMs: number) {
+  await readUpstreamCatalog({ owner_id: binding.owner_id, application: binding.application,
+    source: { repo_id: binding.repo_id, commit_sha: binding.commit_sha },
+    version_id: `ver_${canonicalDigest({ deployment: binding.deployment_id }).slice(7, 33)}`,
+    runtime_target: { kind: "mcp_streamable_http", url: binding.url, deployment_id: binding.deployment_id, environment: binding.environment },
+    auth_config_ref: binding.auth_config_ref }, { timeoutMs, resolveAuth: async () => headers });
+}
+
 /** Token acquisition uses only the owner's external grant and the SDK's resource-bound refresh. */
 export async function authorizeCredential(account: UpstreamAccount, binding: CredentialBinding, store: CredentialStore, timeoutMs = 10_000): Promise<Record<string, string>> {
   assertBinding(account, binding);
   if (store.exclusive) return store.exclusive(account.credential_ref, binding, (locked) => authorizeCredential(account, binding, locked, timeoutMs));
   let secret = await readSecret(store, account, binding);
+  const standard = account.validation_mode === "standard_oauth";
+  if (standard) {
+    if (store.custody !== "encrypted_postgres") throw new FlywheelError("forbidden", "Standard OAuth requires authenticated encrypted PostgreSQL custody.");
+    validateStandardTokens(account, binding, secret);
+  }
   const expires = secret.tokens.expires_in === undefined ? Infinity : secret.obtained_at + secret.tokens.expires_in;
   if (secret.resource !== binding.resource || secret.audience !== binding.audience || expires < Date.now() / 1000 + 30) {
     if (!secret.tokens.refresh_token || !store.put) throw new FlywheelError("operation_unavailable", "This exact resource needs a renewable owner credential in a writable credential store.");
@@ -145,14 +188,26 @@ export async function authorizeCredential(account: UpstreamAccount, binding: Cre
       await store.beginRefresh?.();
       const tokens = await refreshAuthorization(account.issuer, { metadata, clientInformation: secret.client, refreshToken: secret.tokens.refresh_token,
         resource: binding.resource, fetchFn: credentialFetch(account, timeoutMs) });
-      secret = OAuthCredential.parse({ ...secret, resource: binding.resource, audience: binding.audience, obtained_at: Math.floor(Date.now() / 1000), tokens: { ...tokens, refresh_token: tokens.refresh_token ?? secret.tokens.refresh_token, issuer: account.issuer } });
-      // Persist a possibly rotated refresh token before any further operation, even if audience validation fails.
+      if (tokens.issuer !== undefined && tokens.issuer !== account.issuer) throw new Error("Refresh issuer mismatch");
+      if (standard && tokens.scope !== undefined) {
+        const priorScopes = (secret.tokens.scope ?? secret.acquisition!.scopes.join(" ")).split(/\s+/u).filter(Boolean);
+        if (tokens.scope.split(/\s+/u).filter(Boolean).some((scope) => !priorScopes.includes(scope))) throw new Error("Refresh scope expansion");
+      }
+      secret = OAuthCredential.parse({ ...secret, resource: binding.resource, audience: binding.audience, obtained_at: Math.floor(Date.now() / 1000), tokens: { ...tokens, ...(standard && tokens.scope === undefined ? { scope: secret.tokens.scope ?? secret.acquisition!.scopes.join(" ") } : {}), refresh_token: tokens.refresh_token ?? secret.tokens.refresh_token, issuer: account.issuer } });
+      // A failed standard response leaves the durable refresh fence closed for reconciliation.
+      if (standard) validateStandardTokens(account, binding, secret);
+      // Legacy introspection validates after persistence; standard mode retains the fence on an invalid response.
       await store.put(account.credential_ref, secret, binding);
     } catch { throw new FlywheelError("operation_unavailable", "Resource-bound OAuth refresh or secure token persistence failed; reconcile the account before retrying."); }
   }
   if (secret.tokens.token_type.toLowerCase() !== "bearer") throw new FlywheelError("forbidden", "Only the configured OAuth Bearer token type is supported.");
-  await inspectAccessToken(account, binding, secret, timeoutMs);
-  return { Authorization: `Bearer ${secret.tokens.access_token}` };
+  const headers = { Authorization: `Bearer ${secret.tokens.access_token}` };
+  if (standard) {
+    validateStandardTokens(account, binding, secret);
+    if (secret.tokens.expires_in !== undefined && secret.obtained_at + secret.tokens.expires_in <= Date.now() / 1000) throw new FlywheelError("forbidden", "The acquired OAuth token has expired.");
+    await verifyResourceAcceptance(binding, headers, timeoutMs);
+  } else await inspectAccessToken(account, binding, secret, timeoutMs);
+  return headers;
 }
 
 export interface CredentialMediatorOptions { db: GraphClient; store: CredentialStore; timeoutMs?: number }
