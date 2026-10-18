@@ -1,15 +1,50 @@
 # ToolTuner
 
-A TypeScript MCP gateway with FalkorDB for graph state and optional PostgreSQL for encrypted upstream credentials. Clients keep one
-logical `/mcp` connection and use exactly three outer tools: `list_apps`, `describe`, and
-`dispatch`. Server-side grants independently compose user, development, and management tools.
-The graph connects calls, evidence, feedback, frozen improvement packets, jobs, immutable
-versions, comparisons, recommendations, and separate owner decisions.
+**An agent-facing improvement loop for MCP tools, with evidence and owner-controlled version changes in FalkorDB.**
 
-This is a private M0/M1 implementation in preparation for review. Local checks are described
-in [verification](docs/verification.md). Real ChatGPT/Claude onboarding, public HTTPS, actual
-coding-runner/deployment receipts, and the complete M1 recording remain pending. Local SDK
-evidence does not establish hosted-client compatibility or a completed M1 demo.
+ToolTuner connects a bad tool result to the version that produced it, the feedback explaining it,
+a frozen improvement packet, a comparison, and the owner's decision. One logical `/mcp`
+connection exposes exactly three outer tools: `list_apps`, `describe`, and `dispatch`.
+Server-side grants separate ordinary use, development evidence access, and management operations.
+This version is agent-facing; no dashboard is required.
+
+## Hackathon demo
+
+Submission target: **Agent Memory and Coordination**, for durable evidence and scoped handoffs
+between agent roles. The demonstration uses SDK clients, not an autonomous LLM coding loop.
+
+The reproducible local demo uses real MCP SDK transports, the production gateway composition,
+and real FalkorDB with synthetic read-only fixtures. One client observes a faulty word count of
+**2**, a pinned corrected candidate of **3**, and an unchanged default of **2**. Feedback and a
+frozen packet preserve the reproduction. A deterministic comparison reports baseline **fail**
+and candidate **pass**. Separate owner activation changes the same client's default to **3**;
+rollback restores **2**. The run also verifies evidence readback from an independent process
+and production-service restart with existing tokens. The database stays running during that check.
+
+The candidate is **prewritten**, not generated autonomously during the demo. A successful local
+run does not establish hosted ChatGPT/Claude compatibility, a coding-agent job, a hosted preview,
+or production activation. See the [submission guide](docs/hackathon-demo.md) for the complete
+walkthrough, Cypher examples, evidence interpretation, and limitations.
+
+## FalkorDB graph model and operations
+
+FalkorDB is required persistent state, not a visualization add-on:
+
+- `Application -[:HAS_VERSION|STABLE]-> Version`
+- `Call -[:RESOLVED]-> Version`; `Call -[:INPUT|OUTPUT]-> Evidence`
+- `Feedback -[:ABOUT]-> Call`; `Feedback -[:TEXT]-> Evidence`
+- `Packet -[:INCLUDES]-> Call / Feedback / Evidence`; `Packet -[:BASED_ON]-> Version`
+- `Evaluation -[:COMPARES]-> Version`; `Evaluation -[:RAN]-> Call`
+- `HumanDecision -[:SELECTED|EXPECTED_CURRENT]-> Version`
+
+Parameterized Cypher in `src/db/evidence.ts` retrieves bounded lineage (up to six hops), checks
+access scope along paths, and links digest-checked frozen packets to their exact baseline and
+evidence. `src/db/experiments.ts` links comparisons to versions and execution calls.
+`src/db/registry.ts` updates the stable edge and records the owner decision in one guarded query;
+a stale expected-current version is rejected. No PageRank or other graph-ranking algorithm is
+claimed. The graph operations are provenance traversal, constrained retrieval, and guarded state
+transition. The [submission guide](docs/hackathon-demo.md) includes runnable parameterized
+read-only Cypher examples; [contracts](docs/contracts.md) describe the complete schema.
 
 ## Install and reproduce locally
 
@@ -100,10 +135,8 @@ record merge, activate, or rollback decisions, with exact version and expected-c
 - [Runbook, grant matrix, recording and handoff](docs/demo.md)
 - [Actual checks, limitations and publication readiness](docs/verification.md)
 
-AI assistants helped implement code, fixtures, and documentation; the owner remains responsible
-for architecture, security, correctness, and explaining the result. Apache-2.0 is a proposal
-pending owner approval. The repository remains private; publication and contest submission are
-not authorized by this preparation.
+AI assistants helped implement code, tests, fixtures, and documentation; the project entrant remains responsible
+for architecture, security, correctness, and explaining the result.
 
 Optional upstream OAuth custody: [PostgreSQL encryption, exact-target bindings and refresh recovery](docs/postgres-credentials.md).
 

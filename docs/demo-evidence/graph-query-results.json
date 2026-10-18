@@ -1,0 +1,75 @@
+{
+  "recorded_at": "2026-10-18T15:47:57.005Z",
+  "kind": "actual-read-only-FalkorDB-query-results",
+  "queries": [
+    {
+      "name": "Frozen packet connects failure, feedback, and baseline",
+      "cypher": "MATCH (p:Packet {owner_id:$owner})-[:INCLUDES]->(c:Call) MATCH (f:Feedback {owner_id:$owner})-[:ABOUT]->(c) MATCH (p)-[:BASED_ON]->(v:Version) RETURN p.packet_id AS packet, c.call_id AS call, f.feedback_id AS feedback, v.version_id AS baseline",
+      "params": {
+        "owner": "owner"
+      },
+      "rows": [
+        {
+          "packet": "packet",
+          "call": "call",
+          "feedback": "feedback",
+          "baseline": "baseline-version"
+        }
+      ]
+    },
+    {
+      "name": "Comparison links both versions and execution calls",
+      "cypher": "MATCH (e:Evaluation {owner_id:$owner})-[:COMPARES]->(v:Version) OPTIONAL MATCH (e)-[:RAN]->(c:Call) RETURN e.evaluation_id AS evaluation, v.version_id AS version, collect(DISTINCT c.call_id) AS calls",
+      "params": {
+        "owner": "owner"
+      },
+      "rows": [
+        {
+          "evaluation": "evaluation",
+          "version": "baseline-version",
+          "calls": [
+            "comparison-call-1",
+            "comparison-call-2"
+          ]
+        },
+        {
+          "evaluation": "evaluation",
+          "version": "candidate-version",
+          "calls": [
+            "comparison-call-1",
+            "comparison-call-2"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Owner decisions and final stable pointer",
+      "cypher": "MATCH (a:Application {owner_id:$owner,application:$app})-[:STABLE]->(s:Version) MATCH (d:HumanDecision {owner_id:$owner,application:$app})-[:SELECTED]->(v:Version) OPTIONAL MATCH (d)-[:EXPECTED_CURRENT]->(p:Version) RETURN d.decision_id AS decision,v.version_id AS selected,p.version_id AS expected_previous,s.version_id AS final_stable ORDER BY d.created_at",
+      "params": {
+        "owner": "owner",
+        "app": "textkit"
+      },
+      "rows": [
+        {
+          "decision": "initial-baseline-activation",
+          "selected": "baseline-version",
+          "expected_previous": null,
+          "final_stable": "baseline-version"
+        },
+        {
+          "decision": "activation",
+          "selected": "candidate-version",
+          "expected_previous": "baseline-version",
+          "final_stable": "baseline-version"
+        },
+        {
+          "decision": "rollback",
+          "selected": "baseline-version",
+          "expected_previous": "candidate-version",
+          "final_stable": "baseline-version"
+        }
+      ]
+    }
+  ],
+  "publication_note": "Public evidence summary of a real local run. Synthetic record identifiers are consistently replaced with semantic labels; raw evidence is retained separately."
+}
