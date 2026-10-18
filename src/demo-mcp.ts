@@ -11,14 +11,14 @@ export function createDemoMcpApp() {
   app.use(express.json({ limit: "16kb", strict: true }));
   const paths = ["/demo/mcp", "/api/demo-mcp"];
   app.post(paths, async (request, response, next) => {
-    const server = new McpServer({ name: "tooltuner-textkit-demo", version: "baseline-v1" });
+    const server = new McpServer({ name: "tooltuner-textkit-demo", version: "candidate-v2" });
     server.registerTool("word_count", {
       description: "Count words in synthetic demo text. Do not send private or sensitive data.",
       inputSchema: z.object({ text: z.string().max(4000) }).strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, async ({ text }) => {
-      // Preserve the existing baseline exactly. Change only after actual user feedback.
-      const value = { count: text.split(" ").filter(Boolean).length };
+      // Count non-whitespace runs, including words separated by tabs or newlines.
+      const value = { count: text.match(/\S+/gu)?.length ?? 0 };
       return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
     });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
