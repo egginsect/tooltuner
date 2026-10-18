@@ -1,0 +1,23 @@
+# Local development dependencies. FalkorDB is the single persistent shared state store.
+# Start with: docker compose up -d falkordb
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: mcp-flywheel-falkordb
+    ports:
+      # Bound to loopback only: the database must never be exposed publicly.
+      - "127.0.0.1:${FALKORDB_PORT:-6379}:6379"
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    environment:
+      # Persist the graph with RDB snapshots and the append-only file so restarts keep data.
+      - REDIS_ARGS=--appendonly yes --save 60 1
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  falkordb-data:

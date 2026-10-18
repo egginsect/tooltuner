@@ -147,3 +147,11 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# --- MCP Flywheel TS project additions ---
+# Local runtime state: job worktrees, scratch output, database dumps
+.flywheel/
+.vercel/
+dump.rdb
+appendonlydir/
+tmp/
