@@ -32,7 +32,10 @@ See [the actual-feedback guide](docs/hackathon-demo.md),
 [the sanitized workflow](docs/demo-evidence/actual-feedback-workflow.json), and
 [actual graph lineage](docs/demo-evidence/actual-feedback-graph.json).
 The deterministic `npm run demo:local` uses a prewritten reference candidate and is a separate
-framework smoke test. The captioned video replays actual outputs; it is not a live screen capture.
+framework smoke test. The latest video renders two genuine terminal-event recordings: a fresh
+`describe(version)` and same-client **2 → 3 → 2** routing run, followed by read-only Cypher
+queries against a verified restored snapshot of the earlier same-graph workflow. It is not a
+desktop screencast. Earlier captioned slide videos are sanitized output replays.
 
 ## FalkorDB graph model and operations
 

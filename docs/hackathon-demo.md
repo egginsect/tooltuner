@@ -32,7 +32,17 @@ The MCP gateway URL and client configuration stayed fixed throughout. The previe
 explicitly with `dispatch.version`; calls omitting that selector continued to use stable.
 Enrollment alone does not make a candidate the default.
 
-The replay uses sanitized actual outputs and code changes. It is not a live screen capture.
+The latest video is an MP4 rendering of two genuine timed terminal-event recordings:
+
+- A fresh live gateway session describes the candidate version, then returns **2 → 3 → 2**
+  through one MCP URL and one SDK client/session. Persisted readback confirms the three calls;
+  stable remains unchanged and the temporary grants are revoked afterward.
+- Read-only Cypher runs against a verified restored snapshot of the earlier same-graph
+  feedback workflow described above. This segment inspects stored lineage; it does not claim
+  that the original gateway session is still running.
+
+This is terminal-event capture rendered to video, not a desktop screencast or a recording of
+the earlier coding step. Earlier captioned slide videos replay sanitized actual outputs.
 Human wording, credentials, opaque trace identifiers and provider account IDs are excluded.
 The source repo was separate from ToolTuner. The assistant performed coding externally;
 no built-in coding runner or deployment-manager job is claimed. Owner enrollment stores the
