@@ -1,6 +1,6 @@
 # Standard MCP OAuth owner linking
 
-Flywheel can explicitly link an MCP resource whose authorization server does not offer RFC 7662 introspection. This is an owner-controlled compatibility mode, not a fallback when introspection fails.
+ToolTuner can explicitly link an MCP resource whose authorization server does not offer RFC 7662 introspection. This is an owner-controlled compatibility mode, not a fallback when introspection fails.
 
 ## Authority and custody
 
@@ -8,9 +8,9 @@ Set account `validation_mode` to `standard_oauth`. Omitted mode, or `introspecti
 
 Issuer discovery, registration, token exchange and refresh stay on the explicitly configured issuer origin. Redirects are rejected. Protected resource metadata must match the exact resource and issuer. Its optional `scopes_supported` field may be omitted; when the resource or authorization server advertises scopes, requested scopes must be included.
 
-Acquisition method, account digest, exact binding digest, requested scopes and acquisition time are stored inside the authenticated encrypted credential envelope. They record how Flywheel acquired a token; they are not independently verified token claims. The server does not decode opaque tokens or claim introspection occurred. Every standard-mode authorization performs authenticated MCP initialize/listTools at the exact bound endpoint before returning credentials for normal dispatch.
+Acquisition method, account digest, exact binding digest, requested scopes and acquisition time are stored inside the authenticated encrypted credential envelope. They record how ToolTuner acquired a token; they are not independently verified token claims. The server does not decode opaque tokens or claim introspection occurred. Every standard-mode authorization performs authenticated MCP initialize/listTools at the exact bound endpoint before returning credentials for normal dispatch.
 
-An omitted token-response scope inherits the requested scope for initial acquisition, or the prior granted scope for refresh. Explicit empty, insufficient or expanded scopes are rejected. An omitted expiration is permitted by OAuth; a supplied expiration must be positive, and expired credentials require a valid resource-bound refresh. Remote acceptance is checked on every use. PostgreSQL refresh locking, compare-and-swap and the durable refresh fence remain intact. An invalid or uncertain rotated response leaves the fence closed and requires reconciliation or fresh authorization; Flywheel never silently retries the old refresh token.
+An omitted token-response scope inherits the requested scope for initial acquisition, or the prior granted scope for refresh. Explicit empty, insufficient or expanded scopes are rejected. An omitted expiration is permitted by OAuth; a supplied expiration must be positive, and expired credentials require a valid resource-bound refresh. Remote acceptance is checked on every use. PostgreSQL refresh locking, compare-and-swap and the durable refresh fence remain intact. An invalid or uncertain rotated response leaves the fence closed and requires reconciliation or fresh authorization; ToolTuner never silently retries the old refresh token.
 
 ## Owner commands
 
@@ -30,7 +30,7 @@ OAuth scopes may cover a much broader surface than the selected tools. Keep the 
 
 There is no anonymous-endpoint rejection or independent audience introspection claim in standard mode: trust is the configured issuer, fresh resource-bound acquisition, authenticated custody and the resource server's acceptance. Do not select this mode for a provider whose resource server cannot be trusted to enforce its own authorization.
 
-A provider that omits scope initially but explicitly returns an empty scope on refresh cannot renew a credential requiring a nonempty scope. Flywheel fails closed; fix the provider's scope handling or perform a fresh owner authorization. No provider-specific exception is built in.
+A provider that omits scope initially but explicitly returns an empty scope on refresh cannot renew a credential requiring a nonempty scope. ToolTuner fails closed; fix the provider's scope handling or perform a fresh owner authorization. No provider-specific exception is built in.
 
 ## Safe device-flow diagnostics
 

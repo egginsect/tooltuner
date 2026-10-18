@@ -6,10 +6,10 @@ real hosted-client, coding-runner and verified preview receipts required below r
 The contest's local-setup/video allowance does not replace these project acceptance gates.
 
 The owner confirmed the following:
-- Fresh TypeScript implementation, one Flywheel process, and FalkorDB as the only persistent shared state.
+- Fresh TypeScript implementation, one ToolTuner process, and FalkorDB as the only persistent shared state.
 - The Python repository is a read-only behavior reference. Nothing is ported or copied from it.
-- Flywheel core is exposed through a fixed public HTTPS tunnel at `/mcp`. Wrapped MCP apps and their previews run on Vercel.
-- The owner links the upstream app or account once. Every client gets its own Flywheel grant. Switching versions never requires reconnecting.
+- ToolTuner core is exposed through a fixed public HTTPS tunnel at `/mcp`. Wrapped MCP apps and their previews run on Vercel.
+- The owner links the upstream app or account once. Every client gets its own ToolTuner grant. Switching versions never requires reconnecting.
 - There are exactly three outer tools: `list_apps`, `describe` and `dispatch`. No dashboard, no widgets, no CI or automated suites are prerequisites.
 - Three independently composable tool groups: user, development and management. Human merge and stable activation belong to none of them.
 - A coding job gets development-only access scoped to its app, repo and packet, and works in an isolated worktree.
@@ -24,12 +24,12 @@ The owner confirmed the following:
 | Runtime | Node 24, ESM, TypeScript strict, `tsx` | One process with no build step. |
 | HTTP | express 5 | The MCP SDK auth router and Streamable HTTP transport are express-based. |
 | MCP | `@modelcontextprotocol/sdk` | Maintained transport, auth metadata, DCR, PKCE and bearer middleware. |
-| OAuth | Flywheel acts as its own authorization server through SDK `mcpAuthRouter`, with an owner consent page. Tokens are opaque random values whose hashes are stored in FalkorDB, bound to resource, client and grant. | Uses maintained primitives instead of a self-designed protocol. Claude and ChatGPT both require DCR and PKCE. |
+| OAuth | ToolTuner acts as its own authorization server through SDK `mcpAuthRouter`, with an owner consent page. Tokens are opaque random values whose hashes are stored in FalkorDB, bound to resource, client and grant. | Uses maintained primitives instead of a self-designed protocol. Claude and ChatGPT both require DCR and PKCE. |
 | Schemas | zod v4 (`z.toJSONSchema` for `describe`) | The single source for runtime validation and published schemas. |
 | Graph | `falkordb` npm client, parameterized Cypher, small domain functions | No generic graph plugin layer. |
 | Tunnel | ngrok account dev domain (fixed hostname), or an existing named tunnel | Requires a stable issuer and resource across restarts. |
 | Previews | Vercel CLI behind a small `deployPreview` helper | A replacement seam, not a deployment framework. |
-| Coding runner | One configured coding CLI (`claude -p` or `codex exec`) behind `RunnerAdapter` | Uses the runner's own authentication. Flywheel needs no model API key. |
+| Coding runner | One configured coding CLI (`claude -p` or `codex exec`) behind `RunnerAdapter` | Uses the runner's own authentication. ToolTuner needs no model API key. |
 | Experiments | Explicit version pins, the same input, a deterministic criterion | No live A/B and no statistical winner. |
 
 ## Delivery gates (in order)
@@ -49,9 +49,9 @@ Secrets stay in the process credential environment or an external credential hel
 
 | Item | Config | Agent-runnable? |
 |---|---|---|
-| Public origin | `FLYWHEEL_PUBLIC_ORIGIN` (fixed tunnel hostname) | Needs the owner's ngrok (or other tunnel) account. |
-| OAuth issuer, resource, redirect | Derived from `FLYWHEEL_PUBLIC_ORIGIN`. The issuer, resource (`/mcp`) and metadata must all match. | Yes |
-| Owner consent | `FLYWHEEL_OWNER_SECRET` (secret environment value) | The owner sets the value. |
+| Public origin | `TOOLTUNER_PUBLIC_ORIGIN` (fixed tunnel hostname) | Needs the owner's ngrok (or other tunnel) account. |
+| OAuth issuer, resource, redirect | Derived from `TOOLTUNER_PUBLIC_ORIGIN`. The issuer, resource (`/mcp`) and metadata must all match. | Yes |
+| Owner consent | `TOOLTUNER_OWNER_SECRET` (secret environment value) | The owner sets the value. |
 | FalkorDB | `FALKORDB_URL` | Yes (docker compose) |
 | Allowlisted repos and base SHAs | `RUNNER_CONFIG_PATH` JSON | Yes |
 | Vercel project | `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`, `VERCEL_TOKEN` (manager only) | Needs the owner's `vercel login` or token. |

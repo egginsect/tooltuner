@@ -52,7 +52,7 @@ const safeEnvironment = {
   GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0",
 };
 const runnerEnvironmentNames = new Set(["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
-const reserved = /^(?:PATH|HOME|SHELL|ENV|BASH_ENV|NODE_OPTIONS|LD_.*|DYLD_.*|GIT_.*|NPM_.*|npm_.*|FLYWHEEL_.*)$|(?:VERCEL|MANAGEMENT|MANAGER|OWNER|PRODUCTION|DEPLOY|BYPASS|PROJECT_ID|ORG_ID)/i;
+const reserved = /^(?:PATH|HOME|SHELL|ENV|BASH_ENV|NODE_OPTIONS|LD_.*|DYLD_.*|GIT_.*|NPM_.*|npm_.*|FLYWHEEL_.*|TOOLTUNER_.*)$|(?:VERCEL|MANAGEMENT|MANAGER|OWNER|PRODUCTION|DEPLOY|BYPASS|PROJECT_ID|ORG_ID)/i;
 export function codingEnvironment(config: RunnerConfig, token: string, job: Job): Record<string, string> {
   const env: Record<string, string> = { PATH: "/usr/bin:/bin", HOME: "/home/runner", LANG: "C.UTF-8" };
   for (const [name, value] of Object.entries(config.environment)) {
@@ -61,6 +61,10 @@ export function codingEnvironment(config: RunnerConfig, token: string, job: Job)
     }
     env[name] = value;
   }
+  env.TOOLTUNER_DEVELOPMENT_TOKEN = token;
+  env.TOOLTUNER_JOB_ID = job.job_id;
+  env.TOOLTUNER_PACKET_ID = job.packet_id;
+  // Temporary aliases for existing runner adapters.
   env.FLYWHEEL_DEVELOPMENT_TOKEN = token;
   env.FLYWHEEL_JOB_ID = job.job_id;
   env.FLYWHEEL_PACKET_ID = job.packet_id;
@@ -186,7 +190,7 @@ export function createLocalRunner(options: LocalRunnerOptions): RunnerAdapter {
     }
     if (await git(run.directory, ["ls-files", "--others", "--ignored", "--exclude-standard"])) throw new FlywheelError("forbidden", "Ignored job output is outside the committed artifact; keep caches and temporary files in /tmp.");
     await git(run.directory, ["add", "--all"]);
-    await git(run.directory, ["-c", "user.name=Flywheel runner", "-c", "user.email=runner@localhost", "commit", "-m", `Job ${run.input.job.job_id}`]);
+    await git(run.directory, ["-c", "user.name=ToolTuner runner", "-c", "user.email=runner@localhost", "commit", "-m", `Job ${run.input.job.job_id}`]);
     const commit = await git(run.directory, ["rev-parse", "HEAD"]);
     const tree = await git(run.directory, ["rev-parse", "HEAD^{tree}"]);
     run.result = { branch: `job/${run.input.job.job_id}`, commit_sha: commit,

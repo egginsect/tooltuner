@@ -27,14 +27,14 @@ export function configReadiness(config: Config): ReadinessItem[] {
 
   items.push(
     config.publicOrigin === undefined
-      ? { name: "public_origin", status: "not_configured", critical: false, detail: "FLYWHEEL_PUBLIC_ORIGIN is unset; only local access is available", action: "Set FLYWHEEL_PUBLIC_ORIGIN to the fixed HTTPS gateway origin (see .env.example)" }
+      ? { name: "public_origin", status: "not_configured", critical: false, detail: "TOOLTUNER_PUBLIC_ORIGIN is unset; only local access is available", action: "Set TOOLTUNER_PUBLIC_ORIGIN to the fixed HTTPS gateway origin (see .env.example)" }
       : { name: "public_origin", status: "unverified", critical: false, detail: `${config.publicOrigin} is configured but not yet verified to reach this process` },
   );
 
   const oauthMissing = [
-    config.publicOrigin === undefined ? "FLYWHEEL_PUBLIC_ORIGIN" : undefined,
-    config.oauth.resource === undefined ? "OAUTH_RESOURCE (or FLYWHEEL_PUBLIC_ORIGIN)" : undefined,
-    config.auth.mode === "owner-secret" && config.owner.secret === undefined ? "FLYWHEEL_OWNER_SECRET" : undefined,
+    config.publicOrigin === undefined ? "TOOLTUNER_PUBLIC_ORIGIN" : undefined,
+    config.oauth.resource === undefined ? "OAUTH_RESOURCE (or TOOLTUNER_PUBLIC_ORIGIN)" : undefined,
+    config.auth.mode === "owner-secret" && config.owner.secret === undefined ? "TOOLTUNER_OWNER_SECRET" : undefined,
   ].filter((entry): entry is string => entry !== undefined);
   if (config.auth.mode === "supabase") items.push({ name: "supabase_auth", status: "unverified", critical: true,
     detail: "Supabase password and Google sign-in configured; provider settings and real browser login are unverified",
@@ -50,7 +50,7 @@ export function configReadiness(config: Config): ReadinessItem[] {
     status: "not_configured",
     critical: false,
     detail: "No upstream credential store configured; local fixtures need no account",
-    action: "Configure FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION or local credentialStore and use the owner account link command (docs/demo.md)",
+    action: "Configure TOOLTUNER_CREDENTIAL_ACTIVE_KEY_VERSION or local credentialStore and use the owner account link command (docs/demo.md)",
   });
 
   items.push(

@@ -28,7 +28,7 @@ async function withClient<T>(
   work: (client: Client, signal: AbortSignal, markSent: () => void) => Promise<T>,
 ): Promise<T> {
   const timeoutMs = boundedTimeout(options.timeoutMs);
-  const client = new Client({ name: "mcp-flywheel-gateway", version: "1.0.0" });
+  const client = new Client({ name: "tooltuner-gateway", version: "1.0.0" });
   const controller = new AbortController();
   let sent = false;
   let timer: NodeJS.Timeout | undefined;

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-MCP Flywheel TS (Graph Hacks demo, Linear project P-TOO-6): one TypeScript process in front of
+ToolTuner (Graph Hacks demo, Linear project P-TOO-6): one TypeScript process in front of
 MCP applications, with FalkorDB as the persistent graph state and optional PostgreSQL for encrypted upstream credential custody. The public MCP surface is
 fixed to `list_apps`, `describe` and `dispatch`. This file is the entry point for every coding
 agent working in this repository (`CLAUDE.md` points here).

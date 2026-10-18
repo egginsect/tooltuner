@@ -29,12 +29,12 @@ export function renderOwnerLoginPage(input: {
   resource: string;
   ownerSecretConfigured: boolean;
 }): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Owner login · MCP Flywheel</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Owner login · ToolTuner</title>
 <meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font:15px system-ui;max-width:640px;margin:2rem auto;padding:0 1rem">
 <h1>Sign in to authorize MCP client</h1>
 <p><b>${esc(input.client.client_name ?? input.client.client_id)}</b> wants to access <code>${esc(input.resource)}</code>.</p>
 <p>Enter the owner secret to review available grants and the selected callback. Login does not approve access.</p>
-${input.ownerSecretConfigured ? "" : '<p>FLYWHEEL_OWNER_SECRET is not configured. Ask the operator to configure it before connecting.</p>'}
+${input.ownerSecretConfigured ? "" : '<p>TOOLTUNER_OWNER_SECRET is not configured. Ask the operator to configure it before connecting.</p>'}
 <form method="post" action="/oauth/owner-login">
 <input type="hidden" name="request_id" value="${esc(input.requestId)}">
 <p><label>Owner secret <input type="password" name="owner_secret" autocomplete="current-password" required></label></p>
@@ -60,7 +60,7 @@ export function renderConsentPage(input: {
     .join("\n");
   const blocked = input.grants.length === 0
     ? `<p class="warn">No active grants. Create one with <code>npm run owner -- grant create ...</code> and restart the connection.</p>` : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Authorize ${esc(clientName)} · MCP Flywheel</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Authorize ${esc(clientName)} · ToolTuner</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:15px system-ui;max-width:640px;margin:2rem auto;padding:0 1rem}.grant{display:block;border:1px solid #ccc;border-radius:6px;padding:.6rem;margin:.4rem 0}
 .warn{color:#a40}code{font-size:12px}button{padding:.5rem 1rem;margin-right:.5rem}</style></head><body>

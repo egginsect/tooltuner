@@ -24,7 +24,7 @@ with the full result of `git rev-parse HEAD` from the exact clean fixture checko
 ```json
 {
   "baseUrl": "http://127.0.0.1:8790",
-  "source": { "repo_id": "tooltuner/mcp-flywheel-oss", "commit_sha": "<FULL_CLEAN_CHECKOUT_SHA>" },
+  "source": { "repo_id": "egginsect/tooltuner", "commit_sha": "<FULL_CLEAN_CHECKOUT_SHA>" },
   "initializeStable": true
 }
 ```
@@ -44,7 +44,7 @@ dedicated graph or plan a migration. Preserve failed/unknown records for reconci
 ## Enroll another isolated local application
 
 The owner CLI can enroll an actual local MCP application without changing the fixture list.
-Use a fresh synthetic application database and a dedicated Flywheel graph. This path supports
+Use a fresh synthetic application database and a dedicated ToolTuner graph. This path supports
 anonymous Streamable HTTP on literal `127.0.0.1` or `[::1]` only; it does not link external
 accounts, import connector tokens, or configure a production upstream.
 
@@ -80,7 +80,7 @@ a new label. An optional parent must be an exact version ID in the same app/repo
 
 Enrollment never initializes or moves stable. Use the returned exact `version_id` in `describe`
 and `dispatch`; missing stable remains unavailable. Create only the authorized app/tool/repository
-grants described below. A read-only application call still creates Flywheel evidence, so use
+grants described below. A read-only application call still creates ToolTuner evidence, so use
 synthetic inputs and outputs. Report truthful feedback, then freeze a packet with the actual
 call/feedback references; a positive result is not a demonstrated defect or repair.
 
@@ -94,8 +94,8 @@ These inputs are required before claiming the corresponding gate passed.
    `127.0.0.1:8787`. For an installed/authenticated ngrok account with a fixed dev domain, the
    intended command is `ngrok http --url=<fixed-domain> 8787`. Tunnel installation/account setup
    and this command remain unverified here. Do not tunnel only `/mcp`.
-2. Set `FLYWHEEL_PUBLIC_ORIGIN=https://<fixed-domain>` with no path or trailing slash, and supply
-   a strong `FLYWHEEL_OWNER_SECRET` through the operator's credential environment. Do not put it
+2. Set `TOOLTUNER_PUBLIC_ORIGIN=https://<fixed-domain>` with no path or trailing slash, and supply
+   a strong `TOOLTUNER_OWNER_SECRET` through the operator's credential environment. Do not put it
    in shell history, screenshots or PRs. The built-in issuer is that origin; the resource is
    `https://<fixed-domain>/mcp`. Explicit `OAUTH_ISSUER`/`OAUTH_RESOURCE` must match.
 3. Restart the service. The public-origin probe must match this process's `/healthz` instance ID.
@@ -104,7 +104,7 @@ These inputs are required before claiming the corresponding gate passed.
    `https://<fixed-domain>/.well-known/oauth-protected-resource/mcp`. Registration, `/authorize`,
    `/token`, `/revoke`, `/oauth/owner-login`, and `/oauth/consent` must reach the same service.
 4. Create separate grants, then in each real client's remote MCP connection UI enter
-   `https://<fixed-domain>/mcp`. Follow the redirect to the Flywheel consent form. The owner
+   `https://<fixed-domain>/mcp`. Follow the redirect to the ToolTuner consent form. The owner
    first supplies the consent secret locally on the owner-login form. Only after authentication
    does the server display grant choices; select the intended grant and approve once per client
    authorization. The selection form carries a short-lived request-bound capability, never the
@@ -129,7 +129,7 @@ provisioned external OAuth credential. Create a **nonsecret** JSON file outside 
     "auth_config_ref": "owner:textkit-preview",
     "credential_ref": "helper:textkit-preview",
     "application": "textkit",
-    "repo_id": "tooltuner/mcp-flywheel-oss",
+    "repo_id": "egginsect/tooltuner",
     "environment": "preview",
     "issuer": "https://<approved-issuer>",
     "introspection_url": "https://<approved-issuer>/introspect",
@@ -193,10 +193,10 @@ Create distinct grant IDs (returned by these local owner commands). The group is
 owner and does not depend on the client brand:
 
 ```sh
-npm run owner -- grant create --label demo-user --groups user --apps textkit,catalog --repos tooltuner/mcp-flywheel-oss
-npm run owner -- grant create --label demo-development --groups development --apps textkit --repos tooltuner/mcp-flywheel-oss
-npm run owner -- grant create --label demo-management --groups management --apps textkit --repos tooltuner/mcp-flywheel-oss
-npm run owner -- grant create --label demo-union --groups user,development,management --apps textkit,catalog --repos tooltuner/mcp-flywheel-oss
+npm run owner -- grant create --label demo-user --groups user --apps textkit,catalog --repos egginsect/tooltuner
+npm run owner -- grant create --label demo-development --groups development --apps textkit --repos egginsect/tooltuner
+npm run owner -- grant create --label demo-management --groups management --apps textkit --repos egginsect/tooltuner
+npm run owner -- grant create --label demo-union --groups user,development,management --apps textkit,catalog --repos egginsect/tooltuner
 npm run owner -- grant list
 ```
 

@@ -185,7 +185,7 @@ it("keeps absent adapters unavailable and rejects privileged credentials in codi
     username: process.env.FALKORDB_USERNAME, password: process.env.FALKORDB_PASSWORD });
   const root = await mkdtemp(path.join(tmpdir(), "flywheel-runtime-config-"));
   try {
-    const config = loadConfig({ FLYWHEEL_OWNER_SECRET: "synthetic-owner-consent-secret" });
+    const config = loadConfig({ TOOLTUNER_OWNER_SECRET: "synthetic-owner-consent-secret" });
     const runtime = await createRuntime({ config, db });
     expect(runtime.provider).toBeUndefined();
     for (const operation of ["start_job", "register_preview", "run_experiment"] as const) expect(runtime.handlers[operation]).toBeUndefined();
@@ -193,6 +193,10 @@ it("keeps absent adapters unavailable and rejects privileged credentials in codi
       environmentAllowlist: ["OPENAI_API_KEY"], writablePaths: ["src"], checks: [], timeoutMs: 1000, network: false };
     await expect(createRuntime({ config, db, integrations: { runnerConfigs: [{ ...runnerConfig,
       environment: { OPENAI_API_KEY: config.owner.secret! } }] } })).rejects.toThrow("cannot reuse owner, database or deployment credentials");
+    for (const name of ["TOOLTUNER_CREDENTIAL_POSTGRES_URL", "TOOLTUNER_CREDENTIAL_KEYS", "FLYWHEEL_CREDENTIAL_POSTGRES_URL", "FLYWHEEL_CREDENTIAL_KEYS"]) {
+      await expect(createRuntime({ config, db, environment: { [name]: "synthetic-custody-only-value" }, integrations: { runnerConfigs: [{ ...runnerConfig,
+        environment: { OPENAI_API_KEY: "synthetic-custody-only-value" } }] } })).rejects.toThrow("cannot reuse owner, database or deployment credentials");
+    }
     const file = path.join(root, "runtime.json");
     await writeFile(file, JSON.stringify({ runnerConfigs: [{ ...runnerConfig, environmentRefs: { OPENAI_API_KEY: "VERCEL_TOKEN" } }] }));
     const fromFile = loadConfig({ RUNNER_CONFIG_PATH: file });

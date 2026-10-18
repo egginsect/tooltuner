@@ -1,5 +1,5 @@
 /**
- * Single shared contract source for MCP Flywheel (Linear TOO-65).
+ * Single shared contract source for ToolTuner (Linear TOO-65).
  *
  * Every module imports records, operation payloads, errors, grants and limits
  * from here. Do not define a second payload shape elsewhere; change this file
