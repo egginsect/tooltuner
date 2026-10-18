@@ -4,7 +4,7 @@
  * dispatch. Every request re-reads the grant, so revocation is immediate.
  */
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, type Store, type Options as RateLimitOptions } from "express-rate-limit";
 import { z } from "zod";
 import { StorageError } from "../errors.js";
 import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
@@ -51,6 +51,8 @@ export interface GatewayMountOptions {
   /** Protected resource, `<publicOrigin>/mcp`. */
   resource: string;
   log?: (msg: string, fields?: Record<string, unknown>) => void;
+  trustProxy?: string | number | boolean;
+  rateLimitStore?: (endpoint: string) => Store;
 }
 
 const SERVER_INSTRUCTIONS = [
@@ -150,8 +152,12 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
   if (resourceUrl.href !== new URL("/mcp", issuerUrl).href || issuerUrl.pathname !== "/" || issuerUrl.search || issuerUrl.hash || issuerUrl.username || issuerUrl.password) {
     throw new Error("Gateway issuer must be an origin and resource must be its /mcp endpoint");
   }
-  // Behind the tunnel the client IP arrives in X-Forwarded-For (rate limiting needs it).
-  app.set("trust proxy", "loopback");
+  // Local tunnels use loopback. Hosted limits are endpoint-global and never
+  // derive a security key from unverified forwarding headers.
+  app.set("trust proxy", opts.trustProxy ?? "loopback");
+  const limits = (endpoint: string): Partial<RateLimitOptions> => opts.rateLimitStore
+    ? { store: opts.rateLimitStore(endpoint), keyGenerator: () => "gateway", passOnStoreError: false }
+    : {};
 
   // Compose maintained SDK handlers so metadata advertises only the public
   // PKCE clients this provider actually accepts (the convenience router also
@@ -172,10 +178,10 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
       return;
     }
     next();
-  }, authorizationHandler({ provider: opts.provider }));
-  app.use("/token", tokenHandler({ provider: opts.provider }));
-  app.use("/register", clientRegistrationHandler({ clientsStore: opts.provider.clientsStore }));
-  app.use("/revoke", revocationHandler({ provider: opts.provider }));
+  }, authorizationHandler({ provider: opts.provider, rateLimit: limits("authorize") }));
+  app.use("/token", tokenHandler({ provider: opts.provider, rateLimit: limits("token") }));
+  app.use("/register", clientRegistrationHandler({ clientsStore: opts.provider.clientsStore, rateLimit: limits("register") }));
+  app.use("/revoke", revocationHandler({ provider: opts.provider, rateLimit: limits("revoke") }));
 
   const consentHeaders = (_req: Request, res: Response, next: NextFunction) => {
     res.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
@@ -184,7 +190,7 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
   };
   app.use(["/oauth/owner-login", "/oauth/consent"], consentHeaders);
   app.post("/oauth/owner-login",
-    rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }),
+    rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false, ...limits("owner-login") }),
     express.urlencoded({ extended: false, limit: "16kb" }),
     async (req: Request, res: Response) => {
       const parsed = z.object({ request_id: z.string().min(1).max(128), owner_secret: z.string().max(4096) }).safeParse(req.body);
@@ -199,7 +205,7 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
 
   app.post(
     "/oauth/consent",
-    rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }),
+    rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false, ...limits("consent") }),
     express.urlencoded({ extended: false, limit: "16kb" }),
     async (req: Request, res: Response) => {
       res.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY" });
@@ -272,7 +278,7 @@ export function mountGateway(app: Express, opts: GatewayMountOptions): void {
   };
   app.get("/mcp", bearer, notAllowed);
   app.delete("/mcp", bearer, notAllowed);
-  app.use(["/mcp", "/oauth/owner-login", "/oauth/consent"], (error: unknown, _req: Request, res: Response, next: NextFunction) => {
+  app.use(["/mcp", "/authorize", "/token", "/register", "/revoke", "/oauth/owner-login", "/oauth/consent"], (error: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) { next(error); return; }
     const storage = error instanceof StorageError;
     const status = storage ? 503 : (error as { status?: number })?.status === 400 ? 400 : 500;

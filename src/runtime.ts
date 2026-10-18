@@ -14,6 +14,7 @@ import { REGISTRY_INDEX_SPECS } from "./db/registry.js";
 import { EVIDENCE_INDEX_SPECS, getCall, getEvidence, getPacket } from "./db/evidence.js";
 import { JOB_INDEX_SPECS } from "./db/jobs.js";
 import { EXPERIMENT_INDEX_SPECS } from "./db/experiments.js";
+import { RATE_LIMIT_INDEX_SPECS, createGraphRateLimitStore } from "./db/rate-limits.js";
 import { issueTokenPair } from "./db/auth.js";
 import { getVersion } from "./db/registry.js";
 import { createEvidenceService, createJobService, createExperimentService, createTrustedExperimentReplay, createLocalRunner, createVercelManager,
@@ -33,7 +34,7 @@ import { seedConfiguredFixtures } from "../fixtures/registry.js";
 /** Later module indexes belong to the composition layer, never to the auth layer. */
 export const RUNTIME_INDEX_SPECS = [
   ...INDEX_SPECS, ...REGISTRY_INDEX_SPECS, ...EVIDENCE_INDEX_SPECS,
-  ...JOB_INDEX_SPECS, ...EXPERIMENT_INDEX_SPECS,
+  ...JOB_INDEX_SPECS, ...EXPERIMENT_INDEX_SPECS, ...RATE_LIMIT_INDEX_SPECS,
 ];
 
 const FixtureConfig = z.object({
@@ -99,6 +100,11 @@ export interface RuntimeOptions {
 export async function createRuntime(options: RuntimeOptions) {
   const { config, db } = options;
   const environment = options.environment ?? process.env;
+  const hosted = config.runtimeMode === "hosted";
+  if (hosted && (config.runner.configPath || config.registry.fixtureRegistryPath || options.integrations?.runner || options.integrations?.manager ||
+      options.integrations?.repositories?.length || options.integrations?.runnerConfigs?.length || options.integrations?.experimentConfigs?.length)) {
+    throw new Error("Hosted gateways cannot run local jobs, experiments, deployment managers or fixture seeding");
+  }
   const lifecycle = options.lifecycle ?? new Lifecycle();
   const instanceId = options.instanceId ?? randomUUID();
   const report = await bootstrapSchema(db, RUNTIME_INDEX_SPECS);
@@ -116,7 +122,12 @@ export async function createRuntime(options: RuntimeOptions) {
   let manager = integrations.manager;
   let resolveAuth = integrations.resolveAuth;
   let credentialStore: CredentialStore | undefined;
+  try {
   let previewProjects = integrations.previewProjects ?? [];
+  if (config.credentials.activeKeyVersion) {
+    credentialStore = createConfiguredCredentialStore({ kind: "postgres", activeKeyVersion: config.credentials.activeKeyVersion, tls: true }, environment);
+    resolveAuth ??= createCredentialMediator({ db, store: credentialStore, timeoutMs: integrations.timeoutMs }).resolveAuth;
+  }
   if (config.runner.configPath) {
     const file = RuntimeFile.parse(JSON.parse(await readFile(config.runner.configPath, "utf8")));
     repositories = integrations.repositories ?? file.repositories;
@@ -136,6 +147,7 @@ export async function createRuntime(options: RuntimeOptions) {
     }));
     if (!runner && file.workspaceRoot && runnerConfigs.length) runner = createLocalRunner({ workspaceRoot: file.workspaceRoot });
     if (file.credentialStore) {
+      if (credentialStore) throw new Error("Choose either environment-configured custody or credentialStore in RUNNER_CONFIG_PATH");
       credentialStore = createConfiguredCredentialStore(file.credentialStore, environment);
       const credentials = createCredentialMediator({ db, store: credentialStore, timeoutMs: integrations.timeoutMs });
       resolveAuth ??= credentials.resolveAuth;
@@ -233,15 +245,25 @@ export async function createRuntime(options: RuntimeOptions) {
   let provider: FlywheelOAuthProvider | undefined;
   if (config.publicOrigin && config.oauth.resource && config.owner.secret) {
     provider = new FlywheelOAuthProvider({ db, ownerId: config.owner.id, resource: config.oauth.resource, ownerSecret: config.owner.secret });
-    const gatewayOptions = { core, provider, publicOrigin: config.publicOrigin, resource: config.oauth.resource, log: options.log };
+    const gatewayOptions = { core, provider, publicOrigin: config.publicOrigin, resource: config.oauth.resource, log: options.log,
+      ...(hosted ? { trustProxy: false, rateLimitStore: (endpoint: string) => createGraphRateLimitStore(db, endpoint) } : {}) };
     mounts.push((app) => mountGateway(app, gatewayOptions));
     replace({ name: "flywheel_oauth", status: "unverified", critical: true,
       detail: "OAuth discovery, DCR, PKCE, refresh, consent and protected /mcp mounted; real client consent remains unverified",
       action: `Create separate owner grants and connect clients to ${config.oauth.resource}` });
   }
+  if (hosted) {
+    replace({ name: "runtime", status: "ready", critical: false, detail: "Hosted request handler; local listeners, fixtures, runners and deployment managers are disabled" });
+    replace({ name: "runner", status: "not_configured", critical: false, detail: "Local coding jobs are disabled in hosted mode" });
+    replace({ name: "vercel", status: "not_configured", critical: false, detail: "Deployment management is disabled in the hosted gateway" });
+  }
   const app = createApp({ instanceId, lifecycle,
     checkStorage: async () => ({ graph: db.graphName, schema_version: await readSchemaVersion(db) }), mounts });
   return { app, core, provider, lifecycle, instanceId, readiness, report, handlers, closeCredentials: async () => { await credentialStore?.close?.(); } };
+  } catch (error) {
+    await credentialStore?.close?.();
+    throw error;
+  }
 }
 
 function listen(server: Server, config: Config): Promise<void> {

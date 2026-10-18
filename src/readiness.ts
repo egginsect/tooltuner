@@ -27,7 +27,7 @@ export function configReadiness(config: Config): ReadinessItem[] {
 
   items.push(
     config.publicOrigin === undefined
-      ? { name: "public_origin", status: "not_configured", critical: false, detail: "FLYWHEEL_PUBLIC_ORIGIN is unset; only local access is available", action: "Set FLYWHEEL_PUBLIC_ORIGIN to the fixed HTTPS tunnel origin (see .env.example)" }
+      ? { name: "public_origin", status: "not_configured", critical: false, detail: "FLYWHEEL_PUBLIC_ORIGIN is unset; only local access is available", action: "Set FLYWHEEL_PUBLIC_ORIGIN to the fixed HTTPS gateway origin (see .env.example)" }
       : { name: "public_origin", status: "unverified", critical: false, detail: `${config.publicOrigin} is configured but not yet verified to reach this process` },
   );
 
@@ -47,7 +47,7 @@ export function configReadiness(config: Config): ReadinessItem[] {
     status: "not_configured",
     critical: false,
     detail: "No upstream credential store configured; local fixtures need no account",
-    action: "Configure credentialStore in RUNNER_CONFIG_PATH and use the owner account link command (docs/demo.md)",
+    action: "Configure FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION or local credentialStore and use the owner account link command (docs/demo.md)",
   });
 
   items.push(

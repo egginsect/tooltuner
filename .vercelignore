@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+config/runtime.json
+.flywheel
+.vercel
+node_modules
+tests
+docs
+*.log
+*.patch
+*.tgz
+dump.rdb
+appendonlydir
+tmp

@@ -13,6 +13,8 @@ export const AUTH_INDEX_SPECS: readonly IndexSpec[] = [
   { label: "OAuthCode", property: "code_hash", unique: true },
   { label: "OAuthToken", property: "token_hash", unique: true },
   { label: "OAuthFamily", property: "family_id", unique: true },
+  { label: "OAuthPending", property: "request_hash", unique: true },
+  { label: "OAuthPending", property: "expires_at" },
 ];
 
 export const hashSecret = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
@@ -195,4 +197,66 @@ export async function revokeFamily(db: GraphClient, familyId: string, at: number
     { family: familyId, at },
     "revoking a token family",
   );
+}
+
+/* --------------------------------------------------------- browser consent */
+
+export interface PendingBinding { ownerId: string; resource: string }
+const pendingParams = (binding: PendingBinding, requestId: string, now: number) => ({
+  owner: binding.ownerId, resource: binding.resource, hash: hashSecret(requestId), now,
+});
+
+/** Expired requests are unusable even before opportunistic physical cleanup. */
+export async function insertPendingAuthorization(db: GraphClient, binding: PendingBinding, requestId: string,
+  document: string, expiresAt: number, now: number): Promise<boolean> {
+  await db.query("MATCH (p:OAuthPending {owner_id: $owner}) WHERE p.expires_at <= $now DELETE p",
+    { owner: binding.ownerId, now }, "removing expired authorization requests");
+  const rows = await db.query<{ created: boolean }>(
+    `OPTIONAL MATCH (p:OAuthPending {owner_id: $owner, resource: $resource}) WHERE p.expires_at > $now
+     WITH count(p) AS total WHERE total < 1000
+     CREATE (:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource,
+       expires_at: $expires, state: 'login', doc: $doc}) RETURN true AS created`,
+    { ...pendingParams(binding, requestId, now), expires: expiresAt, doc: document }, "storing an authorization request");
+  return rows[0]?.created === true;
+}
+
+export async function readPendingAuthorization(db: GraphClient, binding: PendingBinding, requestId: string, now: number): Promise<string | null> {
+  const rows = await db.roQuery<{ doc: string }>(
+    `MATCH (p:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource})
+     WHERE p.expires_at > $now AND p.state IN ['login', 'selection'] RETURN p.doc AS doc`,
+    pendingParams(binding, requestId, now), "reading an authorization request");
+  return rows[0]?.doc ?? null;
+}
+
+/** Claim once across instances before loading grant metadata. Failure stays closed. */
+export async function claimPendingLogin(db: GraphClient, binding: PendingBinding, requestId: string, now: number): Promise<string | null> {
+  const rows = await db.query<{ doc: string }>(
+    `MATCH (p:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource})
+     WHERE p.expires_at > $now AND p.state = 'login' SET p.state = 'claimed' RETURN p.doc AS doc`,
+    pendingParams(binding, requestId, now), "claiming an owner login");
+  return rows[0]?.doc ?? null;
+}
+
+export async function finishPendingLogin(db: GraphClient, binding: PendingBinding, requestId: string, now: number,
+  document: string, selectionHash: string, selectionExpiresAt: number): Promise<boolean> {
+  const rows = await db.query<{ completed: boolean }>(
+    `MATCH (p:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource})
+     WHERE p.expires_at > $now AND p.state = 'claimed'
+     SET p.state = 'selection', p.doc = $doc, p.selection_hash = $selection, p.selection_expires_at = $expires
+     RETURN true AS completed`,
+    { ...pendingParams(binding, requestId, now), doc: document, selection: selectionHash, expires: selectionExpiresAt },
+    "persisting a grant selection capability");
+  return rows[0]?.completed === true;
+}
+
+/** Approval must atomically consume the matching, unexpired selection capability. */
+export async function consumePendingAuthorization(db: GraphClient, binding: PendingBinding, requestId: string,
+  now: number, approve: boolean, selectionHash: string): Promise<string | null> {
+  const rows = await db.query<{ doc: string }>(
+    `MATCH (p:OAuthPending {request_hash: $hash, owner_id: $owner, resource: $resource})
+     WHERE p.expires_at > $now AND p.state IN ['login', 'selection']
+       AND ($approve = false OR (p.state = 'selection' AND p.selection_hash = $selection AND p.selection_expires_at > $now))
+     SET p.state = 'consumed' RETURN p.doc AS doc`,
+    { ...pendingParams(binding, requestId, now), approve, selection: selectionHash }, "consuming an authorization request");
+  return rows[0]?.doc ?? null;
 }

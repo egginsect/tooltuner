@@ -62,6 +62,14 @@ The process does not automatically load `.env` files. With no public origin and 
 secret it serves health only. Follow the [operator runbook](docs/demo.md) to register fixtures,
 create grants, expose the complete OAuth origin and capture actual client receipts.
 
+## Hosted gateway preparation
+
+The request-only Vercel Node entry is `api/index.ts`; `vercel.json` routes the complete origin
+to it. It reuses the gateway composition without starting a listener or local coding jobs.
+See [Vercel gateway setup and verification](docs/vercel-gateway.md) for required external
+storage, secret injection, stable-origin OAuth, and the deployment checks still required.
+This configuration does not create a project or deploy anything.
+
 ## Architecture and review
 
 `src/server.ts` owns process signals and startup reporting; `src/runtime.ts` composes the real
