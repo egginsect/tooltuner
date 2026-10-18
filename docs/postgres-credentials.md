@@ -66,15 +66,22 @@ and credential reference for each separately authorized target; do not copy a ro
 credential across references. Automatic multi-preview credential derivation is not implemented.
 The existing helper and read-only environment adapters retain their behavior.
 
-Refresh holds a PostgreSQL session advisory lock for the reference, reloads the latest encrypted
-row and conditionally marks its token version as refreshing before contacting the issuer. A
-second process fails closed while the lock is held; it may retry after the first finishes. The
-new encrypted token document is persisted with a version compare-and-swap before introspection
-or dispatch. Omitted refresh tokens in an issuer response preserve the prior refresh token.
+Refresh uses short, atomic PostgreSQL statements and supports direct, session-pooled and
+transaction-pooled endpoints. Reading an encrypted snapshot and issuer discovery do not claim
+or consume a refresh token; failures before the claim can safely retry. Immediately before the
+token request, a compare-and-swap marks the exact binding/version as refreshing and advances
+its version. Only the successful claimant can persist the replacement encrypted document,
+advance the version again and clear that fence. Competing claims and stale ordinary writes
+fail closed. No database connection or session lock is held across network requests. Omitted
+refresh tokens in an issuer response preserve the prior refresh token.
 
-The refresh marker is committed independently of the remote operation. An interrupted request,
-process crash or uncertain database write leaves the credential fenced rather than reusing a
-possibly consumed refresh token. There is no automatic timeout reset. An owner must reconcile the
+The refresh marker is committed independently of the remote operation. Once claimed, even a
+crash before sending the request is conservatively uncertain. Interrupted token requests and
+unknown claim acknowledgements leave the credential fenced rather than reusing a possibly
+consumed refresh token. There is no automatic timeout reset. An unknown completion write
+returns failure: storage may retain the fence or already contain the committed replacement,
+which a later read can use. Neither outcome permits replaying the old refresh token.
+An owner must reconcile the
 issuer state and reauthorize under a new reference/account binding; blindly clearing the fence or
 restoring an old database snapshot can replay revoked credentials. Root writes are insert-only;
 there is no blind overwrite/relink escape hatch. Driver errors and credential values are never
@@ -103,5 +110,5 @@ The separate `npm run test:credentials` needs `TEST_CREDENTIAL_POSTGRES_URL` poi
 loopback PostgreSQL database, plus `FALKORDB_URL` for the one end-to-end runtime check. It creates the credential table and leaves synthetic rows in that
 disposable database. Its random ephemeral keys and token fixtures are test-only. Checks cover
 ciphertext-only rows, every identity field, tag corruption, key-version reads/rotation, independent
-connections and a separate process contending for refresh, stale CAS, durable interrupted-refresh fencing, loss of the exact test database session, and synthetic browser linking/CLI/runtime dispatch without secret graph evidence. Do not run
+connections and a separate process contending for refresh, stale CAS, durable interrupted-refresh fencing, pre-claim retry and connection-free network work, and synthetic browser linking/CLI/runtime dispatch without secret graph evidence. Do not run
 it against a real custody database.

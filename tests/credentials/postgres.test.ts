@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { Pool } from "pg";
 import { createPostgresCredentialStore } from "../../src/gateway/postgres-credentials.js";
 import type { CredentialBinding } from "../../src/db/registry.js";
@@ -79,18 +79,91 @@ test("interrupted remote refresh remains fenced after releasing the connection",
   await expect(store.exclusive!(ref, binding, async (locked) => { await locked.get(ref); await locked.beginRefresh!(); throw new Error(secret.tokens.refresh_token); })).rejects.toThrow("Encrypted credential custody failed");
   await expect(other.get(ref, binding)).rejects.toThrow("Encrypted credential custody failed");
   await expect(other.put!(ref, secret, binding)).rejects.toThrow();
-  expect((await db.query("SELECT refreshing,token_version FROM flywheel_upstream_credentials WHERE reference=$1", [ref])).rows[0]).toEqual({ refreshing: true, token_version: 1 });
+  expect((await db.query("SELECT refreshing,token_version FROM flywheel_upstream_credentials WHERE reference=$1", [ref])).rows[0]).toEqual({ refreshing: true, token_version: 2 });
 });
 
-test("a lost database session during remote refresh cannot crash or acknowledge success", async () => {
+test("pre-request interruption is retryable but a claimed version is never replayed", async () => {
   const ref = reference(); await store.put!(ref, secret, binding);
-  await expect(store.exclusive!(ref, binding, async (locked) => {
-    await locked.get(ref); await locked.beginRefresh!();
-    // Restrict termination to this test reference in this database, never other cluster sessions.
-    await db.query(`SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
-      AND classid=((hashtextextended($1,0) >> 32) & 4294967295)::oid AND objid=(hashtextextended($1,0) & 4294967295)::oid AND objsubid=1 AND pid <> pg_backend_pid()`, [ref]);
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    return "must not acknowledge";
-  })).rejects.toThrow("Encrypted credential custody failed");
-  await expect(other.get(ref, binding)).rejects.toThrow();
+  await expect(store.exclusive!(ref, binding, async (scoped) => {
+    await scoped.get(ref); throw new Error("discovery failed before claim");
+  })).rejects.toThrow();
+  expect(await other.get(ref, binding)).toEqual(secret);
+  let requests = 0;
+  await expect(store.exclusive!(ref, binding, async (scoped) => {
+    await scoped.get(ref); await scoped.beginRefresh!(); requests++;
+    throw new Error("request timed out with unknown outcome");
+  })).rejects.toThrow();
+  await expect(other.exclusive!(ref, binding, async (scoped) => {
+    await scoped.get(ref); await scoped.beginRefresh!(); requests++;
+  })).rejects.toThrow();
+  expect(requests).toBe(1);
+});
+
+test("stale writers and refresh claimants cannot clear or reuse another claim", async () => {
+  const ref = reference(); await store.put!(ref, secret, binding);
+  await store.exclusive!(ref, binding, async (stale) => {
+    await stale.get(ref);
+    await other.exclusive!(ref, binding, async (winner) => {
+      await winner.get(ref); await winner.beginRefresh!();
+      await expect(stale.put!(ref, secret)).rejects.toThrow();
+      await expect(stale.beginRefresh!()).rejects.toThrow();
+      await expect(winner.beginRefresh!()).rejects.toThrow();
+      expect((await db.query("SELECT refreshing,token_version FROM flywheel_upstream_credentials WHERE reference=$1", [ref])).rows[0]).toEqual({ refreshing: true, token_version: 2 });
+      await winner.put!(ref, { ...secret, tokens: { ...secret.tokens, access_token: "synthetic-winner" } });
+    });
+    await expect(stale.beginRefresh!()).rejects.toThrow();
+    await expect(stale.put!(ref, secret)).rejects.toThrow();
+  });
+  expect((await store.get(ref, binding) as typeof secret).tokens.access_token).toBe("synthetic-winner");
+});
+
+test("network work does not pin database connections and scoped handles expire", async () => {
+  const refs = Array.from({ length: 8 }, reference);
+  await Promise.all(refs.map((ref) => store.put!(ref, secret, binding)));
+  let arrived = 0;
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  await Promise.all(refs.map((ref) => store.exclusive!(ref, binding, async (scoped) => {
+    await scoped.get(ref); await scoped.beginRefresh!();
+    if (++arrived === refs.length) release();
+    await barrier; // More pending remote requests than the adapter's five connections.
+    await scoped.put!(ref, secret);
+  })));
+  const escaped = await store.exclusive!(refs[0]!, binding, async (scoped) => scoped);
+  await expect(escaped.get(refs[0]!)).rejects.toThrow();
+  await expect(escaped.put!(refs[0]!, secret)).rejects.toThrow();
+  await expect(escaped.beginRefresh!()).rejects.toThrow();
+});
+
+test.each(["claim", "completion"] as const)("lost %s acknowledgement fails closed after a committed statement", async (stage) => {
+  const ref = reference(); await store.put!(ref, secret, binding);
+  const original = Pool.prototype.query;
+  let requests = 0;
+  let injected = false;
+  const fault = vi.spyOn(Pool.prototype, "query").mockImplementation((async function (this: Pool, ...args: unknown[]) {
+    const result = await Reflect.apply(original, this, args);
+    const sql = args[0];
+    if (!injected && typeof sql === "string" && sql.startsWith(stage === "claim"
+      ? "UPDATE flywheel_upstream_credentials SET refreshing=true"
+      : "UPDATE flywheel_upstream_credentials SET key_version=")) {
+      injected = true;
+      throw new Error("synthetic lost database acknowledgement");
+    }
+    return result;
+  }) as typeof original);
+  try {
+    await expect(store.exclusive!(ref, binding, async (scoped) => {
+      await scoped.get(ref); await scoped.beginRefresh!(); requests++;
+      await scoped.put!(ref, { ...secret, tokens: { ...secret.tokens, access_token: "synthetic-committed" } });
+      return "must not acknowledge";
+    })).rejects.toThrow("Encrypted credential custody failed");
+    expect(injected).toBe(true);
+  } finally { fault.mockRestore(); }
+  if (stage === "claim") {
+    expect(requests).toBe(0);
+    await expect(other.get(ref, binding)).rejects.toThrow();
+  } else {
+    expect(requests).toBe(1);
+    expect((await other.get(ref, binding) as typeof secret).tokens.access_token).toBe("synthetic-committed");
+  }
 });

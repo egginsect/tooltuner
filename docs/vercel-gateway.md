@@ -86,13 +86,13 @@ To resolve enrolled protected upstreams without loading a local runner file, als
 - `FLYWHEEL_CREDENTIAL_KEYS`: the external versioned JSON keyring described in
   [credential custody](postgres-credentials.md).
 - `FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION`: the matching active encryption key version.
-- `FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE`: explicitly `direct` or `session`.
+- `FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE`: optional informational declaration:
+  `direct`, `session` or `transaction`. It is not required for credential custody.
 
-Transaction-pooling endpoints are unsupported: refresh fencing uses PostgreSQL session
-advisory locks across the upstream request. The mode variable is an operator declaration,
-not automatic detection of a provider's pool behavior. Verify the actual provider endpoint
-and its session-affinity guarantees before installing credentials. Never select `session`
-merely to silence validation.
+Transaction-pooling endpoints are supported. Refresh ownership uses committed atomic
+compare-and-swap statements rather than session advisory locks. No connection is held across
+the upstream request. Interrupted or unknown refresh outcomes remain fenced until owner
+reconciliation; pool reconnects or elapsed time never authorize replaying an old token.
 
 The existing adapter limits each warm instance to five PostgreSQL connections, bounded
 connection/query timeouts and short idle retention. Account for the number of concurrent
@@ -147,7 +147,7 @@ After deployment is separately authorized and succeeds, verify from outside the 
    and complete it on another; replayed consent/code/token operations fail appropriately.
 5. Rate limits persist across separate instances and cannot be bypassed using altered
    forwarding headers. Storage failure blocks OAuth mutation rather than permitting it.
-6. Verify actual database TLS, PostgreSQL session affinity (if configured), connection
+6. Verify actual database TLS, PostgreSQL endpoint connectivity, connection
    budgets, deployment protection, request duration and the intended MCP client's access.
 
 A successful local unit suite or a valid `vercel.json` does not establish any of these live

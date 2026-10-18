@@ -38,14 +38,14 @@ const EnvSchema = z.object({
   VERCEL_TOKEN: optional(z.string()),
   FLYWHEEL_CREDENTIAL_POSTGRES_URL: optional(z.string().min(1)),
   FLYWHEEL_CREDENTIAL_KEYS: optional(z.string().min(1)),
-  FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: optional(z.enum(["direct", "session"])),
+  FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: optional(z.enum(["direct", "session", "transaction"])),
   FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION: optional(z.string().regex(/^[A-Za-z0-9._-]{1,64}$/)),
   LOG_LEVEL: z.preprocess(emptyToUndefined, z.enum(["debug", "info", "warn", "error"]).default("info")),
 });
 
 export interface Config {
   runtimeMode: "local" | "hosted";
-  credentials: { activeKeyVersion: string | undefined; connectionMode: "direct" | "session" | undefined };
+  credentials: { activeKeyVersion: string | undefined; connectionMode: "direct" | "session" | "transaction" | undefined };
   http: { host: string; port: number };
   database: { url: string; graph: string; username: string | undefined; password: string | undefined; connectTimeoutMs: number; queryTimeoutMs: number; maxReconnectAttempts?: number };
   /** Fixed public HTTPS origin; undefined until configured. */
@@ -109,9 +109,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (values.FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION && (!values.FLYWHEEL_CREDENTIAL_POSTGRES_URL || !values.FLYWHEEL_CREDENTIAL_KEYS)) {
     problems.push("FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION: also provide the dedicated PostgreSQL URL and encryption keyring");
   }
-  if (values.FLYWHEEL_RUNTIME_MODE === "hosted" && values.FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION && !values.FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE) {
-    problems.push("FLYWHEEL_CREDENTIAL_POSTGRES_CONNECTION_MODE: declare a direct or session-affine endpoint; transaction pooling cannot preserve refresh locks");
-  }
+
   if (values.FLYWHEEL_RUNTIME_MODE === "hosted" && !values.FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION && (values.FLYWHEEL_CREDENTIAL_POSTGRES_URL || values.FLYWHEEL_CREDENTIAL_KEYS)) {
     problems.push("FLYWHEEL_CREDENTIAL_ACTIVE_KEY_VERSION: required when hosted credential custody secrets are configured");
   }

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { Pool, type PoolClient } from "pg";
+import { Pool } from "pg";
 import { FlywheelError, canonicalJson } from "../contracts.js";
 import { CredentialBinding } from "../db/registry.js";
 import { OAuthCredential, type CredentialStore } from "./credentials.js";
@@ -72,25 +72,21 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
     try { return OAuthCredential.parse(JSON.parse(plaintext.toString("utf8"))); }
     finally { plaintext.fill(0); }
   };
+  // Scope a versioned read/claim/write sequence; concurrency is fenced by SQL CAS,
+  // not by a session lock. Every statement can use a different pooled connection.
   async function exclusive<T>(reference: string, target: CredentialBinding, work: (store: CredentialStore) => Promise<T>): Promise<T> {
-    let client: PoolClient | undefined;
-    let locked = false;
-    let connectionFailed = false;
+    let active = true;
     try {
       const binding = identity(reference, target);
-      client = await pool.connect();
-      client.on("error", () => { connectionFailed = true; });
-      // Session lock covers the remote refresh as well as writes; autocommit preserves the
-      // refresh fence if the process dies after the issuer consumes a rotating token.
-      const lock = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked", [reference]);
-      if (!lock.rows[0]?.locked) throw unavailable();
-      locked = true;
       let version: number | undefined;
+      let claimed = false;
+      const assertActive = () => { if (!active) throw unavailable(); };
       const scoped: CredentialStore = {
         custody: "encrypted_postgres",
         async get(ref, input = target) {
+          assertActive();
           if (ref !== reference || identity(ref, input) !== binding) throw unavailable();
-          const result = await client!.query<EnvelopeRow>("SELECT * FROM flywheel_upstream_credentials WHERE reference=$1", [ref]);
+          const result = await pool.query<EnvelopeRow>("SELECT * FROM flywheel_upstream_credentials WHERE reference=$1", [ref]);
           const row = result.rows[0];
           if (!row) throw unavailable();
           const value = open(binding, row);
@@ -98,34 +94,35 @@ export function createPostgresCredentialStore(options: PostgresCredentialOptions
           return value;
         },
         async beginRefresh() {
-          if (version === undefined) throw unavailable();
-          const result = await client!.query("UPDATE flywheel_upstream_credentials SET refreshing=true WHERE reference=$1 AND binding=$2 AND token_version=$3 AND refreshing=false", [reference, binding, version]);
+          assertActive();
+          if (version === undefined || claimed) throw unavailable();
+          // One committed statement claims this version before any token request. A lost
+          // acknowledgement must never be retried: the durable fence may already exist.
+          const result = await pool.query<{ token_version: number }>("UPDATE flywheel_upstream_credentials SET refreshing=true,token_version=token_version+1 WHERE reference=$1 AND binding=$2 AND token_version=$3 AND refreshing=false RETURNING token_version", [reference, binding, version]);
           if (result.rowCount !== 1) throw unavailable();
+          version = result.rows[0]!.token_version;
+          claimed = true;
         },
         async put(ref, value, input = target) {
+          assertActive();
           if (ref !== reference || identity(ref, input) !== binding) throw unavailable();
           const secret = OAuthCredential.parse(value);
           if (secret.issuer !== target.issuer || secret.environment !== target.environment || secret.resource !== target.resource || secret.audience !== target.audience) throw unavailable();
           const e = seal(binding, secret);
           const params = [reference, binding, e.key_version, e.nonce, e.ciphertext, e.tag];
           const result = version === undefined
-            ? await client!.query("INSERT INTO flywheel_upstream_credentials (reference,binding,key_version,nonce,ciphertext,tag) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING", params)
-            : await client!.query("UPDATE flywheel_upstream_credentials SET key_version=$3,nonce=$4,ciphertext=$5,tag=$6,token_version=token_version+1,refreshing=false WHERE reference=$1 AND binding=$2 AND token_version=$7", [...params, version]);
+            ? await pool.query("INSERT INTO flywheel_upstream_credentials (reference,binding,key_version,nonce,ciphertext,tag) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING", params)
+            : await pool.query("UPDATE flywheel_upstream_credentials SET key_version=$3,nonce=$4,ciphertext=$5,tag=$6,token_version=token_version+1,refreshing=false WHERE reference=$1 AND binding=$2 AND token_version=$7 AND refreshing=$8", [...params, version, claimed]);
           if (result.rowCount !== 1) throw unavailable();
           version = (version ?? 0) + 1;
+          claimed = false;
         },
       };
-      const result = await work(scoped);
-      if (connectionFailed) throw unavailable();
-      return result;
+      return await work(scoped);
     } catch { throw unavailable(); }
-    finally {
-      if (client) {
-        if (locked) { try { await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [reference]); } catch { /* Destroy the session, never return a possibly locked connection. */ } }
-        client.release(true);
-      }
-    }
+    finally { active = false; }
   }
+
   return {
     custody: "encrypted_postgres",
     exclusive,
