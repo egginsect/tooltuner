@@ -55,10 +55,10 @@ async function finishLink(options: LinkOptions, clientId: string) {
   return { account: saved, binding, schema_digest: canonicalDigest({ tools }) };
 }
 
-/** Owner configured an env/helper reference containing an SDK OAuth credential document. */
+/** Owner configured an environment/helper/PostgreSQL reference containing an SDK OAuth credential document. */
 export async function linkUpstreamAccount(options: LinkOptions) {
   let secret: OAuthCredential;
-  try { secret = OAuthCredential.parse(await options.store.get(options.account.credential_ref)); }
+  try { secret = OAuthCredential.parse(await options.store.get(options.account.credential_ref, configured(options, options.account.client_id ?? "pending-client").binding)); }
   catch { throw new FlywheelError("operation_unavailable", "Configure a valid external OAuth credential reference before linking the account."); }
   if (options.account.client_id && options.account.client_id !== secret.client.client_id) throw new FlywheelError("forbidden", "Configured OAuth client differs from the external credential authority.");
   try { return await finishLink(options, secret.client.client_id); }
@@ -71,7 +71,7 @@ export async function linkUpstreamAccount(options: LinkOptions) {
 export async function beginUpstreamAccountLink(options: LinkOptions & {
   onAuthorizationUrl(url: URL): void | Promise<void>;
 }): Promise<Awaited<ReturnType<typeof linkUpstreamAccount>>> {
-  if (!options.store.put || !options.account.credential_ref.startsWith("helper:")) throw new FlywheelError("operation_unavailable", "Browser linking requires a writable external credential helper reference.");
+  if (!options.store.put || !/^(helper|postgres):/.test(options.account.credential_ref)) throw new FlywheelError("operation_unavailable", "Browser linking requires a writable helper or PostgreSQL credential reference.");
   const initial = configured(options, options.account.client_id ?? "pending-dynamic-registration");
   const prior = await getUpstreamAccount(options.db, initial.account.owner_id, initial.account.auth_config_ref);
   if (prior && canonicalDigest(prior, ["created_at"]) !== canonicalDigest(initial.account, ["created_at"])) throw new FlywheelError("ingest_conflict", "This account reference is already linked; reuse its configured client and external credential authority.");
@@ -113,7 +113,7 @@ export async function beginUpstreamAccountLink(options: LinkOptions & {
     // Pre-registered confidential clients are read only from the helper; no secret CLI argument.
     let client;
     if (options.account.client_id) {
-      const external = await options.store.get(options.client_ref ?? options.account.credential_ref);
+      const external = await options.store.get(options.client_ref ?? options.account.credential_ref, initial.binding);
       const bundle = OAuthCredential.safeParse(external);
       client = bundle.success ? bundle.data.client : OAuthClientInformationSchema.parse(external);
       if (client.issuer !== options.account.issuer || client.client_id !== options.account.client_id) throw new FlywheelError("forbidden", "Pre-registered client belongs to another issuer.");
@@ -134,7 +134,7 @@ export async function beginUpstreamAccountLink(options: LinkOptions & {
     const account = configured(options, client.client_id).account;
     const existing = await getUpstreamAccount(options.db, account.owner_id, account.auth_config_ref);
     if (existing && canonicalDigest(existing, ["created_at"]) !== canonicalDigest(account, ["created_at"])) throw new FlywheelError("ingest_conflict", "The account reference changed during authorization; the credential helper was not overwritten.");
-    await options.store.put(options.account.credential_ref, secret);
+    await options.store.put(options.account.credential_ref, secret, configured(options, client.client_id).binding);
     return await finishLink({ ...options, timeoutMs: Math.min(timeoutMs, 30_000) }, client.client_id);
   } catch (error) {
     if (error instanceof FlywheelError) throw error;

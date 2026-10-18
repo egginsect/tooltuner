@@ -292,3 +292,10 @@ IDs, call/feedback/packet/job/version/evaluation refs, expected and actual resul
 notes. Link sanitized screenshots/video timestamps to those refs. Never record bearer/refresh
 tokens, consent secrets, authorization codes, bypass headers, private accounts or browser sessions.
 A new operator/session must reproduce the run; a working video remains pending until captured.
+
+### Optional encrypted upstream credential custody
+
+For upstream OAuth secrets stored in PostgreSQL with an externally supplied versioned keyring,
+see [Encrypted upstream credential custody](postgres-credentials.md). Graph traces, feedback,
+packets and experiments stay in FalkorDB. This optional backend binds each credential reference to
+one exact deployment/resource and fences interrupted rotating-token refreshes for owner recovery.

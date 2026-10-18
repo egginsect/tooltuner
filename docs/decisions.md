@@ -72,3 +72,14 @@ PostgreSQL, OTel, Jaeger, Tempo and the packet scripts are not carried over.
 ## Out of scope for M1
 
 Scheduler or durable work queue, OAuth production hardening, sandbox or RL adapters, trace sharing or marketplace, and any second database. See TOO-71 and TOO-73 through TOO-76. The Apache-2.0 license is a proposal only and needs separate confirmation before publication.
+
+
+## Additive credential custody decision (2026-10-18)
+
+The optional PostgreSQL upstream credential adapter is an approved exception to the original
+single-store/non-goal boundary above. It contains encrypted upstream OAuth documents only;
+graph registry, grants, inbound token hashes, calls, feedback, packets and experiments remain in
+FalkorDB. It uses Node AES-256-GCM with an external versioned keyring and exact-target identity,
+plus cross-process refresh fencing and compare-and-swap. This does not migrate legacy users or
+grants, copy legacy code, implement a KMS envelope system or claim production readiness.
+See [configuration, recovery and operational limits](postgres-credentials.md).

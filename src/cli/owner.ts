@@ -12,7 +12,8 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { Grant, GrantId, newId, SCHEMA_VERSION, ToolGroup, type Grant as GrantRecord } from "../contracts.js";
-import { loadConfig } from "../config.js";
+import { createPostgresCredentialStore } from "../gateway/postgres-credentials.js";
+import { credentialPostgresSecrets, loadConfig } from "../config.js";
 import { GraphClient } from "../db/client.js";
 import { bootstrapSchema, INDEX_SPECS } from "../db/schema.js";
 import { insertGrant, listGrants, revokeGrant } from "../db/auth.js";
@@ -121,14 +122,24 @@ const accountLink: Command = async (db, ownerId, argv) => {
   const input = schema.parse(JSON.parse(await readFile(values.input, "utf8")));
   const options = { db, owner: { owner_id: ownerId, subject: values.subject }, store: createConfiguredCredentialStore(input.credentialStore, process.env),
     account: input.account, target: input.target };
-  const result = values.mode === "existing" ? await linkUpstreamAccount(options) : await beginUpstreamAccountLink({ ...options,
-    onAuthorizationUrl: (url) => { process.stderr.write(`Open this owner authorization URL in your local browser: ${url.href}\n`); },
-  });
-  return { linked: true, auth_config_ref: result.account.auth_config_ref, application: result.account.application,
-    repo_id: result.account.repo_id, environment: result.account.environment, resource: result.binding.resource, schema_digest: result.schema_digest };
+  try {
+    const result = values.mode === "existing" ? await linkUpstreamAccount(options) : await beginUpstreamAccountLink({ ...options,
+      onAuthorizationUrl: (url) => { process.stderr.write(`Open this owner authorization URL in your local browser: ${url.href}\n`); },
+    });
+    return { linked: true, auth_config_ref: result.account.auth_config_ref, application: result.account.application,
+      repo_id: result.account.repo_id, environment: result.account.environment, resource: result.binding.resource, schema_digest: result.schema_digest };
+  } finally { await options.store.close?.(); }
 };
 
 export const COMMANDS: Record<string, Command> = {
+  "credential initialize": async (_db, _ownerId, argv) => {
+    const { values } = parseArgs({ args: argv, options: { input: { type: "string" } } });
+    if (!values.input) throw new Error("credential initialize needs --input <nonsecret-store.json>");
+    const configuration = CredentialStoreConfiguration.parse(JSON.parse(await readFile(values.input, "utf8")));
+    if (configuration.kind !== "postgres") throw new Error("credential initialize requires a PostgreSQL credential store configuration");
+    const store = createPostgresCredentialStore({ ...configuration, ...credentialPostgresSecrets(process.env) });
+    try { await store.initialize(); return { initialized: true }; } finally { await store.close(); }
+  },
   "application enroll-local": async (db, ownerId, argv) => {
     const { values } = parseArgs({ args: argv, options: { input: { type: "string" }, subject: { type: "string" } } });
     if (!values.input || !values.subject) throw new Error("application enroll-local needs --input <nonsecret-local-app.json> --subject <owner identity>");
