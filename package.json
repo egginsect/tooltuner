@@ -14,7 +14,8 @@
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
     "owner": "tsx src/cli/owner.ts",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "test:credentials": "vitest run --config vitest.credentials.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -23,11 +24,13 @@
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "falkordb": "^6.8.0",
+    "pg": "^8.23.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"

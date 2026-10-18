@@ -33,6 +33,8 @@ const EnvSchema = z.object({
   VERCEL_PROJECT_ID: optional(z.string()),
   VERCEL_TEAM_ID: optional(z.string()),
   VERCEL_TOKEN: optional(z.string()),
+  FLYWHEEL_CREDENTIAL_POSTGRES_URL: optional(z.string().min(1)),
+  FLYWHEEL_CREDENTIAL_KEYS: optional(z.string().min(1)),
   LOG_LEVEL: z.preprocess(emptyToUndefined, z.enum(["debug", "info", "warn", "error"]).default("info")),
 });
 
@@ -122,4 +124,15 @@ export function describeConfig(config: Config): Record<string, unknown> {
     vercel: { projectId: config.vercel.projectId ?? "unset", teamId: config.vercel.teamId ?? "unset", token: config.vercel.tokenPresent ? "set" : "unset" },
     logLevel: config.logLevel,
   };
+}
+
+/** Validated separately so key material never enters the public Config object or its errors. */
+export function credentialPostgresSecrets(environment: NodeJS.ProcessEnv): { connectionString: string; keys: Record<string, Buffer> } {
+  try {
+    const connectionString = z.string().min(1).parse(environment.FLYWHEEL_CREDENTIAL_POSTGRES_URL);
+    const input = z.record(z.string().regex(/^[A-Za-z0-9._-]{1,64}$/), z.string().regex(/^[A-Za-z0-9+/]{43}=$/)).parse(JSON.parse(environment.FLYWHEEL_CREDENTIAL_KEYS ?? ""));
+    const keys = Object.fromEntries(Object.entries(input).map(([version, value]) => [version, Buffer.from(value, "base64")]));
+    if (!Object.keys(keys).length || Object.values(keys).some((key) => key.length !== 32)) throw new Error();
+    return { connectionString, keys };
+  } catch { throw new ConfigError(["Encrypted credential custody needs a PostgreSQL URL and a versioned JSON keyring of 32-byte base64 keys in its dedicated environment variables (values withheld)"]); }
 }

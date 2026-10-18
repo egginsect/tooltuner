@@ -5,7 +5,8 @@ import type { Express } from "express";
 import { z } from "zod";
 import path from "node:path";
 import { createApp } from "./app.js";
-import type { Config } from "./config.js";
+import { credentialPostgresSecrets, type Config } from "./config.js";
+import { createPostgresCredentialStore } from "./gateway/postgres-credentials.js";
 import { FlywheelError, type CallRecorder } from "./contracts.js";
 import { GraphClient } from "./db/client.js";
 import { INDEX_SPECS, bootstrapSchema, readSchemaVersion } from "./db/schema.js";
@@ -43,12 +44,14 @@ const FixtureConfig = z.object({
 
 export const CredentialStoreConfiguration = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("environment") }).strict(),
+  z.object({ kind: z.literal("postgres"), activeKeyVersion: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/), tls: z.boolean().default(true) }).strict(),
   z.object({ kind: z.literal("helper"), executable: z.string().refine(path.isAbsolute),
     homeDirectory: z.string().refine(path.isAbsolute).optional() }).strict(),
 ]);
 
 /** External credentials are resolved only in the trusted operator/manager process. */
 export function createConfiguredCredentialStore(configuration: z.infer<typeof CredentialStoreConfiguration>, environment: NodeJS.ProcessEnv): CredentialStore {
+  if (configuration.kind === "postgres") return createPostgresCredentialStore({ ...configuration, ...credentialPostgresSecrets(environment) });
   return configuration.kind === "helper" ? createCredentialHelperStore(configuration) : createEnvironmentCredentialStore(environment);
 }
 
@@ -112,6 +115,7 @@ export async function createRuntime(options: RuntimeOptions) {
   let runner = integrations.runner;
   let manager = integrations.manager;
   let resolveAuth = integrations.resolveAuth;
+  let credentialStore: CredentialStore | undefined;
   let previewProjects = integrations.previewProjects ?? [];
   if (config.runner.configPath) {
     const file = RuntimeFile.parse(JSON.parse(await readFile(config.runner.configPath, "utf8")));
@@ -132,7 +136,8 @@ export async function createRuntime(options: RuntimeOptions) {
     }));
     if (!runner && file.workspaceRoot && runnerConfigs.length) runner = createLocalRunner({ workspaceRoot: file.workspaceRoot });
     if (file.credentialStore) {
-      const credentials = createCredentialMediator({ db, store: createConfiguredCredentialStore(file.credentialStore, environment), timeoutMs: integrations.timeoutMs });
+      credentialStore = createConfiguredCredentialStore(file.credentialStore, environment);
+      const credentials = createCredentialMediator({ db, store: credentialStore, timeoutMs: integrations.timeoutMs });
       resolveAuth ??= credentials.resolveAuth;
       if (!manager && file.credentialStore.kind === "helper" && file.vercelExecutable && environment.VERCEL_TOKEN && file.previewProjects.length) {
         for (const project of file.previewProjects) {
@@ -145,7 +150,7 @@ export async function createRuntime(options: RuntimeOptions) {
       }
     }
   }
-  const privilegedValues = new Set([config.owner.secret, config.database.password, environment.VERCEL_TOKEN].filter((value): value is string => Boolean(value)));
+  const privilegedValues = new Set([config.owner.secret, config.database.password, environment.VERCEL_TOKEN, environment.FLYWHEEL_CREDENTIAL_POSTGRES_URL, environment.FLYWHEEL_CREDENTIAL_KEYS].filter((value): value is string => Boolean(value)));
   for (const value of Object.values(environment)) {
     if (!value?.startsWith("{")) continue;
     try {
@@ -236,7 +241,7 @@ export async function createRuntime(options: RuntimeOptions) {
   }
   const app = createApp({ instanceId, lifecycle,
     checkStorage: async () => ({ graph: db.graphName, schema_version: await readSchemaVersion(db) }), mounts });
-  return { app, core, provider, lifecycle, instanceId, readiness, report, handlers };
+  return { app, core, provider, lifecycle, instanceId, readiness, report, handlers, closeCredentials: async () => { await credentialStore?.close?.(); } };
 }
 
 function listen(server: Server, config: Config): Promise<void> {
@@ -261,7 +266,7 @@ export async function startRuntime(config: Config, options: Omit<RuntimeOptions,
     const close = () => closing ??= (async () => {
       runtime.lifecycle.closeAdmission();
       try { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
-      finally { await db.close(); }
+      finally { try { await runtime.closeCredentials(); } finally { await db.close(); } }
     })();
     return { ...runtime, db, server, close };
   } catch (error) { await db.close(); throw error; }

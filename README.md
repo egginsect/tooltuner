@@ -1,6 +1,6 @@
 # MCP Flywheel TS
 
-A TypeScript MCP gateway with FalkorDB as its single persistent state store. Clients keep one
+A TypeScript MCP gateway with FalkorDB for graph state and optional PostgreSQL for encrypted upstream credentials. Clients keep one
 logical `/mcp` connection and use exactly three outer tools: `list_apps`, `describe`, and
 `dispatch`. Server-side grants independently compose user, development, and management tools.
 The graph connects calls, evidence, feedback, frozen improvement packets, jobs, immutable
@@ -78,3 +78,5 @@ AI assistants helped implement code, fixtures, and documentation; the owner rema
 for architecture, security, correctness, and explaining the result. Apache-2.0 is a proposal
 pending owner approval. The repository remains private; publication and contest submission are
 not authorized by this preparation.
+
+Optional upstream OAuth custody: [PostgreSQL encryption, exact-target bindings and refresh recovery](docs/postgres-credentials.md).

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 MCP Flywheel TS (Graph Hacks demo, Linear project P-TOO-6): one TypeScript process in front of
-MCP applications, with FalkorDB as the single persistent shared state. The public MCP surface is
+MCP applications, with FalkorDB as the persistent graph state and optional PostgreSQL for encrypted upstream credential custody. The public MCP surface is
 fixed to `list_apps`, `describe` and `dispatch`. This file is the entry point for every coding
 agent working in this repository (`CLAUDE.md` points here).
 
@@ -66,7 +66,7 @@ why in the PR.
 ## Conventions
 
 - Prefer composition and dependency injection; pass dependencies explicitly. Small modules, no
-  plugin frameworks, no second database, no scheduler.
+  plugin frameworks, no additional database beyond the opt-in credential custody adapter, no scheduler.
 - Cypher lives only in `src/db/**`, always parameterized through `GraphClient.query/roQuery`.
   Never interpolate values into query text. Labels and property names come from fixed code.
 - Fail with descriptive errors that say what to do next. Never fall back to in-memory storage or

@@ -11,8 +11,11 @@ import { boundedTimeout, type UpstreamTarget } from "./upstream.js";
 
 /** Implementations must never print requests, responses or underlying helper errors. */
 export interface CredentialStore {
-  get(reference: string): Promise<unknown>;
-  put?(reference: string, secret: unknown): Promise<void>;
+  get(reference: string, binding?: CredentialBinding): Promise<unknown>;
+  put?(reference: string, secret: unknown, binding?: CredentialBinding): Promise<void>;
+  exclusive?<T>(reference: string, binding: CredentialBinding, work: (store: CredentialStore) => Promise<T>): Promise<T>;
+  beginRefresh?(): Promise<void>;
+  close?(): Promise<void>;
 }
 
 /** An owner-supplied JSON environment variable, not a token passed on the CLI. Read-only. */
@@ -100,9 +103,9 @@ function assertBinding(account: UpstreamAccount, binding: CredentialBinding): vo
   secureUrl(binding.resource, binding.environment);
 }
 
-async function readSecret(store: CredentialStore, account: UpstreamAccount): Promise<OAuthCredential> {
+async function readSecret(store: CredentialStore, account: UpstreamAccount, binding: CredentialBinding): Promise<OAuthCredential> {
   try {
-    const secret = OAuthCredential.parse(await store.get(account.credential_ref));
+    const secret = OAuthCredential.parse(await store.get(account.credential_ref, binding));
     if (secret.issuer !== account.issuer || secret.environment !== account.environment || secret.client.client_id !== account.client_id ||
         (secret.tokens.issuer && secret.tokens.issuer !== account.issuer) || (secret.client.issuer && secret.client.issuer !== account.issuer)) throw new Error("Credential authority mismatch");
     return secret;
@@ -132,17 +135,19 @@ export async function inspectAccessToken(account: UpstreamAccount, binding: Cred
 /** Token acquisition uses only the owner's external grant and the SDK's resource-bound refresh. */
 export async function authorizeCredential(account: UpstreamAccount, binding: CredentialBinding, store: CredentialStore, timeoutMs = 10_000): Promise<Record<string, string>> {
   assertBinding(account, binding);
-  let secret = await readSecret(store, account);
+  if (store.exclusive) return store.exclusive(account.credential_ref, binding, (locked) => authorizeCredential(account, binding, locked, timeoutMs));
+  let secret = await readSecret(store, account, binding);
   const expires = secret.tokens.expires_in === undefined ? Infinity : secret.obtained_at + secret.tokens.expires_in;
   if (secret.resource !== binding.resource || secret.audience !== binding.audience || expires < Date.now() / 1000 + 30) {
-    if (!secret.tokens.refresh_token || !store.put) throw new FlywheelError("operation_unavailable", "This exact resource needs a renewable owner credential in a writable credential helper.");
+    if (!secret.tokens.refresh_token || !store.put) throw new FlywheelError("operation_unavailable", "This exact resource needs a renewable owner credential in a writable credential store.");
     const metadata = await discoverAccountIssuer(account, timeoutMs);
     try {
+      await store.beginRefresh?.();
       const tokens = await refreshAuthorization(account.issuer, { metadata, clientInformation: secret.client, refreshToken: secret.tokens.refresh_token,
         resource: binding.resource, fetchFn: credentialFetch(account, timeoutMs) });
-      secret = OAuthCredential.parse({ ...secret, resource: binding.resource, audience: binding.audience, obtained_at: Math.floor(Date.now() / 1000), tokens: { ...tokens, issuer: account.issuer } });
+      secret = OAuthCredential.parse({ ...secret, resource: binding.resource, audience: binding.audience, obtained_at: Math.floor(Date.now() / 1000), tokens: { ...tokens, refresh_token: tokens.refresh_token ?? secret.tokens.refresh_token, issuer: account.issuer } });
       // Persist a possibly rotated refresh token before any further operation, even if audience validation fails.
-      await store.put(account.credential_ref, secret);
+      await store.put(account.credential_ref, secret, binding);
     } catch { throw new FlywheelError("operation_unavailable", "Resource-bound OAuth refresh or secure token persistence failed; reconcile the account before retrying."); }
   }
   if (secret.tokens.token_type.toLowerCase() !== "bearer") throw new FlywheelError("forbidden", "Only the configured OAuth Bearer token type is supported.");
