@@ -27,12 +27,17 @@ npm run test:integration
 npm run demo
 ```
 
-`npm run demo` starts real local MCP fixtures and the production service composition, performs
-DCR, PKCE, owner consent, SDK calls, feedback, packet freezing, four grant catalogs and denials,
-refresh, storage failure and persistence readback. It creates a UUID graph and deletes that graph
-on completion. Its receipt labels the source commit and whether the checkout is dirty. The local
-fixture registration records that checkout base; a dirty run is not committed artifact provenance.
-The script neither launches a coding job nor deploys or activates a corrected example.
+For a one-command local demonstration, run `npm run demo:local` (Node 24 and Docker Compose
+required; it installs dependencies if absent and waits for real FalkorDB). Or set `FALKORDB_URL`
+to use an existing database. See the [five-minute walkthrough](docs/local-demo.md).
+
+`npm run demo` starts real local MCP fixtures and the production service composition, enrolls
+stable/candidate versions, performs OAuth and same-client routing, records traces/feedback/a
+frozen packet, and compares the faulty baseline with a prewritten corrected candidate. Separate
+owner activation and rollback change the same client's default from 2 to 3 and back to 2. It
+checks grant denials, refresh, storage recovery and independent-process persistence readback.
+The UUID graph is deleted afterward. The receipt labels source commit and dirty checkout status;
+a dirty run is not committed artifact provenance. No coding job or deployment is launched.
 
 `npm run test:integration` also uses owned UUID graphs. Set `FALKORDB_URL` if the database is
 elsewhere; use separate `FALKORDB_USERNAME` and `FALKORDB_PASSWORD` variables for credentials.
